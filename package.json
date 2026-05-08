@@ -1,0 +1,74 @@
+{
+  "name": "discord-local-voiceboard",
+  "version": "0.1.0",
+  "description": "Local Discord TTS and soundboard app that plays into a virtual audio device without a bot.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
+    "pack": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --publish never",
+    "test": "node --test",
+    "lint": "node --check src/main/main.js && node --check src/main/windowsAudio.js && node --check src/preload.cjs && node --check src/renderer/app.js && node --check src/shared/library.cjs"
+  },
+  "keywords": [
+    "discord",
+    "tts",
+    "soundboard",
+    "electron"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "lucide": "^1.14.0",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.8.1"
+  },
+  "build": {
+    "appId": "local.voiceboard.discord",
+    "productName": "Voiceboard",
+    "copyright": "Copyright (c) 2026 Voiceboard",
+    "asar": true,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "node_modules/lucide/**/*",
+      "node_modules/ws/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Voiceboard"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+out/
+.voiceboard-test/
+npm-debug.log*
+*.tmp
