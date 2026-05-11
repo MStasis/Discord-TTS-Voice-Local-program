@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("voiceboard", {
   deletePhrase: (id) => ipcRenderer.invoke("phrase:delete", id),
   importSounds: () => ipcRenderer.invoke("sound:import"),
   deleteSound: (id) => ipcRenderer.invoke("sound:delete", id),
+  addLog: (payload) => ipcRenderer.invoke("log:add", payload),
   synthesizeTts: (payload) => ipcRenderer.invoke("tts:synthesize", payload),
   getCableStatus: () => ipcRenderer.invoke("audio:get-cable-status"),
   setupCableAudio: () => ipcRenderer.invoke("audio:setup-cable"),

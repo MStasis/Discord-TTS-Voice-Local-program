@@ -5,6 +5,7 @@ const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const {
+  addLog,
   addPhrase,
   addSound,
   normalizeState,
@@ -186,6 +187,19 @@ function registerIpc() {
     if (sound && isInsideDirectory(dataPaths().sounds, sound.path)) {
       await fsp.unlink(sound.path).catch(() => {});
     }
+
+    return withMediaUrls(next);
+  });
+
+  ipcMain.handle("log:add", (_event, payload = {}) => {
+    const text = typeof payload.text === "string" ? payload.text.trim() : "";
+    const next = store.update((state) =>
+      addLog(state, {
+        id: createId("log"),
+        text,
+        createdAt: new Date().toISOString()
+      })
+    );
 
     return withMediaUrls(next);
   });

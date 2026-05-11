@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  addLog,
   addPhrase,
   addSound,
   normalizeState,
@@ -30,7 +31,11 @@ test("normalizes damaged state into a usable library", () => {
       voice: ""
     },
     phrases: [{ id: "a", label: "  Hello   there  ", text: "  hello  " }, { text: "" }],
-    sounds: [{ id: "s", label: "", path: "C:/sounds/ping.mp3" }, { label: "no-path" }]
+    sounds: [{ id: "s", label: "", path: "C:/sounds/ping.mp3" }, { label: "no-path" }],
+    logs: [
+      { id: "l", text: "  sent text  ", createdAt: "2026-05-11T00:00:00.000Z" },
+      { id: "empty", text: "" }
+    ]
   });
 
   assert.equal(state.version, 1);
@@ -48,6 +53,9 @@ test("normalizes damaged state into a usable library", () => {
   assert.deepEqual(state.phrases, [{ id: "a", label: "Hello there", text: "hello" }]);
   assert.equal(state.sounds.length, 1);
   assert.equal(state.sounds[0].label, "ping");
+  assert.deepEqual(state.logs, [
+    { id: "l", text: "sent text", createdAt: "2026-05-11T00:00:00.000Z" }
+  ]);
 });
 
 test("adds and removes quick phrases", () => {
@@ -76,6 +84,28 @@ test("adds and removes soundboard entries", () => {
 
   const removed = removeSound(withSound, "sound-1");
   assert.equal(removed.sounds.length, 0);
+});
+
+test("adds sent voice logs newest first and keeps the configured limit", () => {
+  const initial = normalizeState({
+    logs: [{ id: "old", text: "old text", createdAt: "2026-05-10T00:00:00.000Z" }]
+  });
+  const withLogs = addLog(
+    initial,
+    { id: "new", text: "  new text  ", createdAt: "2026-05-11T00:00:00.000Z" },
+    2
+  );
+  const capped = addLog(
+    withLogs,
+    { id: "latest", text: "latest text", createdAt: "2026-05-12T00:00:00.000Z" },
+    2
+  );
+
+  assert.deepEqual(
+    capped.logs.map((log) => log.id),
+    ["latest", "new"]
+  );
+  assert.equal(capped.logs[1].text, "new text");
 });
 
 test("formats Edge TTS controls", () => {

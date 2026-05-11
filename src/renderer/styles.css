@@ -430,6 +430,15 @@ svg {
   background: #fbfcfd;
 }
 
+.log-item {
+  cursor: pointer;
+}
+
+.log-item:focus-visible {
+  outline: 3px solid rgba(16, 163, 127, 0.2);
+  outline-offset: 2px;
+}
+
 .library-item strong {
   overflow-wrap: anywhere;
   font-size: 15px;

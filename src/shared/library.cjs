@@ -20,7 +20,8 @@ const DEFAULT_STATE = Object.freeze({
   version: 1,
   settings: DEFAULT_SETTINGS,
   phrases: [],
-  sounds: []
+  sounds: [],
+  logs: []
 });
 
 function normalizeText(value) {
@@ -109,6 +110,19 @@ function normalizeSound(item) {
   };
 }
 
+function normalizeLog(item) {
+  const text = normalizeText(item && item.text);
+  if (!text) {
+    return null;
+  }
+
+  return {
+    id: normalizeText(item.id),
+    text,
+    createdAt: normalizeText(item.createdAt) || new Date(0).toISOString()
+  };
+}
+
 function normalizeState(input = {}) {
   const phrases = Array.isArray(input.phrases)
     ? input.phrases.map(normalizePhrase).filter(Boolean)
@@ -116,12 +130,14 @@ function normalizeState(input = {}) {
   const sounds = Array.isArray(input.sounds)
     ? input.sounds.map(normalizeSound).filter(Boolean)
     : [];
+  const logs = Array.isArray(input.logs) ? input.logs.map(normalizeLog).filter(Boolean) : [];
 
   return {
     version: 1,
     settings: normalizeSettings(input.settings),
     phrases,
-    sounds
+    sounds,
+    logs
   };
 }
 
@@ -178,9 +194,23 @@ function removeSound(state, id) {
   });
 }
 
+function addLog(state, log, limit = 200) {
+  const current = normalizeState(state);
+  const normalized = normalizeLog(log);
+  if (!normalized || !normalized.id) {
+    return current;
+  }
+
+  return normalizeState({
+    ...current,
+    logs: [normalized, ...current.logs.filter((item) => item.id !== normalized.id)].slice(0, limit)
+  });
+}
+
 module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_STATE,
+  addLog,
   addPhrase,
   addSound,
   normalizeState,

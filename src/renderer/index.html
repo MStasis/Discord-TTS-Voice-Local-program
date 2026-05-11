@@ -41,6 +41,10 @@
             <i data-lucide="music-2"></i>
             <span>사운드</span>
           </a>
+          <a href="#logs-panel" class="nav-item">
+            <i data-lucide="history"></i>
+            <span>로그</span>
+          </a>
           <a href="#settings-panel" class="nav-item">
             <i data-lucide="sliders-horizontal"></i>
             <span>설정</span>
@@ -171,6 +175,17 @@
           </div>
           <div class="item-grid" id="soundGrid"></div>
           <p class="empty-state" id="emptySounds">저장된 사운드가 없습니다.</p>
+        </section>
+
+        <section class="library-section" id="logs-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Voice log</p>
+              <h3>전송 내역</h3>
+            </div>
+          </div>
+          <div class="item-grid log-grid" id="logGrid"></div>
+          <p class="empty-state" id="emptyLogs">아직 전송한 문장이 없습니다.</p>
         </section>
       </main>
     </div>

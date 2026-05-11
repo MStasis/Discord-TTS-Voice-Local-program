@@ -29,6 +29,8 @@ const dom = {
   importSoundsButton: document.querySelector("#importSoundsButton"),
   soundGrid: document.querySelector("#soundGrid"),
   emptySounds: document.querySelector("#emptySounds"),
+  logGrid: document.querySelector("#logGrid"),
+  emptyLogs: document.querySelector("#emptyLogs"),
   cableInstallModal: document.querySelector("#cableInstallModal"),
   downloadCableButton: document.querySelector("#downloadCableButton"),
   retryCableButton: document.querySelector("#retryCableButton"),
@@ -47,11 +49,13 @@ let state = {
     monitorEnabled: true
   },
   phrases: [],
-  sounds: []
+  sounds: [],
+  logs: []
 };
 
 const activePlayers = new Set();
 let cableInstallModalDismissed = false;
+let isSpeaking = false;
 
 function setStatus(text, tone = "ready") {
   dom.statusText.textContent = text;
@@ -66,6 +70,20 @@ function signed(value, suffix) {
 
 function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
+}
+
+function formatLogTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "시간 정보 없음";
+  }
+
+  return date.toLocaleString("ko-KR", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function updateControlValues() {
@@ -324,7 +342,8 @@ async function releaseCableRouting() {
   }
 }
 
-async function speakText(text) {
+async function speakText(text, options = {}) {
+  const { clearComposer = false } = options;
   const normalized = text.trim();
   if (!normalized) {
     setStatus("문장을 입력하세요", "error");
@@ -332,7 +351,12 @@ async function speakText(text) {
     return;
   }
 
+  if (isSpeaking) {
+    return;
+  }
+
   try {
+    isSpeaking = true;
     setStatus("TTS 생성 중", "busy");
     dom.speakButton.disabled = true;
     const result = await VOICEBOARD.synthesizeTts({
@@ -340,6 +364,13 @@ async function speakText(text) {
       settings: state.settings
     });
     await playUrl(result.fileUrl);
+    state = await VOICEBOARD.addLog({ text: normalized });
+    render();
+
+    if (clearComposer && dom.ttsText.value.trim() === normalized) {
+      dom.ttsText.value = "";
+    }
+
     if (result.engine === "windows-fallback") {
       setStatus("Windows 음성으로 재생 중", "busy");
     }
@@ -347,8 +378,13 @@ async function speakText(text) {
     console.error(error);
     setStatus("TTS 생성 실패", "error");
   } finally {
+    isSpeaking = false;
     dom.speakButton.disabled = false;
   }
+}
+
+function speakFromComposer() {
+  return speakText(dom.ttsText.value, { clearComposer: true });
 }
 
 function renderPhrases() {
@@ -414,10 +450,50 @@ function renderSounds() {
   });
 }
 
+function renderLogs() {
+  dom.logGrid.innerHTML = "";
+  dom.emptyLogs.hidden = state.logs.length > 0;
+
+  state.logs.forEach((log) => {
+    const item = document.createElement("article");
+    item.className = "library-item log-item";
+    item.tabIndex = 0;
+    item.setAttribute("role", "button");
+    item.setAttribute("aria-label", `${log.text} 다시 전송`);
+    item.innerHTML = `
+      <strong></strong>
+      <p></p>
+      <div class="item-actions"></div>
+    `;
+    item.querySelector("strong").textContent = log.text;
+    item.querySelector("p").textContent = formatLogTime(log.createdAt);
+
+    const actions = item.querySelector(".item-actions");
+    const playButton = createButton("secondary-button", "rotate-ccw", "다시 전송", "로그 다시 전송");
+
+    playButton.addEventListener("click", () => speakText(log.text));
+    item.addEventListener("click", (event) => {
+      if (!(event.target instanceof Element && event.target.closest("button"))) {
+        speakText(log.text);
+      }
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        speakText(log.text);
+      }
+    });
+
+    actions.append(playButton);
+    dom.logGrid.append(item);
+  });
+}
+
 function render() {
   updateControlValues();
   renderPhrases();
   renderSounds();
+  renderLogs();
   refreshIcons();
 }
 
@@ -425,7 +501,20 @@ function bindEvents() {
   dom.refreshDevicesButton.addEventListener("click", refreshDevices);
   dom.openDataButton.addEventListener("click", () => VOICEBOARD.openDataFolder());
   dom.stopAllButton.addEventListener("click", stopAll);
-  dom.speakButton.addEventListener("click", () => speakText(dom.ttsText.value));
+  dom.speakButton.addEventListener("click", speakFromComposer);
+  dom.ttsText.addEventListener("keydown", (event) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.isComposing
+    ) {
+      event.preventDefault();
+      speakFromComposer();
+    }
+  });
   dom.setupCableButton.addEventListener("click", setupCableRouting);
   dom.releaseCableButton.addEventListener("click", releaseCableRouting);
   dom.downloadCableButton.addEventListener("click", () => VOICEBOARD.openVbCableDownload());
