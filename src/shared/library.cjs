@@ -194,6 +194,14 @@ function removeSound(state, id) {
   });
 }
 
+function updateSound(state, id, patch) {
+  const current = normalizeState(state);
+  return normalizeState({
+    ...current,
+    sounds: current.sounds.map((item) => (item.id === id ? { ...item, ...patch, id: item.id } : item))
+  });
+}
+
 function addLog(state, log, limit = 200) {
   const current = normalizeState(state);
   const normalized = normalizeLog(log);
@@ -220,5 +228,6 @@ module.exports = {
   safeLabel,
   toEdgePercent,
   toEdgePitch,
+  updateSound,
   updateSettings
 };

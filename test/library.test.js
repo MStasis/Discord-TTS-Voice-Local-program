@@ -10,9 +10,11 @@ const {
   safeFileName,
   toEdgePercent,
   toEdgePitch,
+  updateSound,
   updateSettings
 } = require("../src/shared/library.cjs");
 const { createSsmlMessage } = require("../src/main/tts");
+const { isSupportedYoutubeUrl, parseYtDlpOutput, resolveFfmpegPath } = require("../src/main/youtube");
 
 test("normalizes damaged state into a usable library", () => {
   const state = normalizeState({
@@ -86,6 +88,22 @@ test("adds and removes soundboard entries", () => {
   assert.equal(removed.sounds.length, 0);
 });
 
+test("updates soundboard entries", () => {
+  const state = addSound(normalizeState(), {
+    id: "sound-1",
+    label: "Ping",
+    path: "C:/sounds/ping.wav"
+  });
+  const updated = updateSound(state, "sound-1", {
+    label: "Ping Trimmed",
+    path: "C:/sounds/ping-trimmed.mp3"
+  });
+
+  assert.equal(updated.sounds[0].id, "sound-1");
+  assert.equal(updated.sounds[0].label, "Ping Trimmed");
+  assert.equal(updated.sounds[0].path, "C:/sounds/ping-trimmed.mp3");
+});
+
 test("adds sent voice logs newest first and keeps the configured limit", () => {
   const initial = normalizeState({
     logs: [{ id: "old", text: "old text", createdAt: "2026-05-10T00:00:00.000Z" }]
@@ -138,4 +156,21 @@ test("escapes TTS text when creating SSML", () => {
   assert.match(ssmlMessage, /xml:lang='ko-KR'/);
   assert.match(ssmlMessage, /5 &lt; 6 &amp; &apos;quote&apos;/);
   assert.doesNotMatch(ssmlMessage, /5 < 6/);
+});
+
+test("recognizes supported YouTube links", () => {
+  assert.equal(isSupportedYoutubeUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), true);
+  assert.equal(isSupportedYoutubeUrl("https://youtu.be/dQw4w9WgXcQ"), true);
+  assert.equal(isSupportedYoutubeUrl("https://example.com/watch?v=dQw4w9WgXcQ"), false);
+});
+
+test("parses yt-dlp title and converted mp3 filepath output", () => {
+  const parsed = parseYtDlpOutput("Example Title\r\nC:\\\\Voiceboard\\\\youtube-cache\\\\file.mp3\r\n");
+
+  assert.equal(parsed.title, "Example Title");
+  assert.equal(parsed.filePath, "C:\\\\Voiceboard\\\\youtube-cache\\\\file.mp3");
+});
+
+test("finds the bundled ffmpeg binary", () => {
+  assert.match(resolveFfmpegPath(), /ffmpeg(\.exe)?$/);
 });

@@ -168,9 +168,26 @@
               <p class="eyebrow">Soundboard</p>
               <h3>사운드보드</h3>
             </div>
-            <button class="primary-button" id="importSoundsButton" type="button">
-              <i data-lucide="file-plus-2"></i>
-              <span>사운드 추가</span>
+            <div class="section-actions">
+              <button class="secondary-button" id="stopSoundsButton" type="button">
+                <i data-lucide="square"></i>
+                <span>사운드 정지</span>
+              </button>
+              <button class="primary-button" id="importSoundsButton" type="button">
+                <i data-lucide="file-plus-2"></i>
+                <span>사운드 추가</span>
+              </button>
+            </div>
+          </div>
+          <div class="youtube-row">
+            <input id="youtubeUrlInput" type="url" placeholder="YouTube 링크 붙여넣기" />
+            <button class="secondary-button" id="playYoutubeButton" type="button">
+              <i data-lucide="play"></i>
+              <span>YouTube 재생</span>
+            </button>
+            <button class="secondary-button" id="saveYoutubeButton" type="button">
+              <i data-lucide="plus"></i>
+              <span>보드에 추가</span>
             </button>
           </div>
           <div class="item-grid" id="soundGrid"></div>
@@ -217,6 +234,37 @@
             </button>
             <button class="ghost-button" id="dismissCableButton" type="button">
               <span>나중에</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="soundEditModal" hidden>
+      <section class="modal edit-modal" role="dialog" aria-modal="true" aria-labelledby="soundEditTitle">
+        <div class="modal-icon">
+          <i data-lucide="scissors"></i>
+        </div>
+        <div class="modal-copy">
+          <p class="eyebrow">Sound edit</p>
+          <h3 id="soundEditTitle">사운드 편집</h3>
+          <div class="edit-form">
+            <label class="field">
+              <span>시작 위치(초)</span>
+              <input id="soundEditStartInput" type="number" min="0" step="0.1" value="0" />
+            </label>
+            <label class="field">
+              <span>길이(초)</span>
+              <input id="soundEditDurationInput" type="number" min="0.1" step="0.1" value="5" />
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="primary-button" id="saveSoundEditButton" type="button">
+              <i data-lucide="save"></i>
+              <span>저장</span>
+            </button>
+            <button class="secondary-button" id="cancelSoundEditButton" type="button">
+              <span>취소</span>
             </button>
           </div>
         </div>

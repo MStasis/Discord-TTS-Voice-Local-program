@@ -1,8 +1,10 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
+const { execFile } = require("node:child_process");
 const crypto = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
+const { promisify } = require("node:util");
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const {
   addLog,
@@ -13,6 +15,7 @@ const {
   removeSound,
   safeFileName,
   safeLabel,
+  updateSound,
   updateSettings
 } = require("../shared/library.cjs");
 const { LibraryStore } = require("./store");
@@ -23,6 +26,9 @@ const {
   restoreCaptureDefaults,
   setupCableCaptureDefaults
 } = require("./windowsAudio");
+const { resolveFfmpegPath, resolveYoutubeAudio, trimOldYoutubeFiles } = require("./youtube");
+
+const execFileAsync = promisify(execFile);
 
 let mainWindow;
 let store;
@@ -37,9 +43,11 @@ function dataPaths() {
   const root = app.getPath("userData");
   return {
     root,
+    bin: path.join(root, "bin"),
     library: path.join(root, "library.json"),
     sounds: path.join(root, "sounds"),
-    tts: path.join(root, "tts-cache")
+    tts: path.join(root, "tts-cache"),
+    youtube: path.join(root, "youtube-cache")
   };
 }
 
@@ -60,11 +68,12 @@ function isInsideDirectory(parent, child) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-async function copySoundIntoLibrary(filePath) {
+async function copySoundIntoLibrary(filePath, labelOverride = "") {
   const paths = dataPaths();
   await fsp.mkdir(paths.sounds, { recursive: true });
 
-  const fileName = safeFileName(path.basename(filePath));
+  const label = safeLabel(labelOverride || path.parse(filePath).name, "Sound");
+  const fileName = safeFileName(`${label}${path.extname(filePath) || ".mp3"}`);
   const destination = path.join(
     paths.sounds,
     `${Date.now()}-${Math.random().toString(16).slice(2)}-${fileName}`
@@ -73,9 +82,60 @@ async function copySoundIntoLibrary(filePath) {
   await fsp.copyFile(filePath, destination);
   return {
     id: createId("sound"),
-    label: safeLabel(path.parse(fileName).name, "Sound"),
+    label,
     path: destination
   };
+}
+
+function normalizeTrimPayload(payload = {}) {
+  const startSeconds = Math.max(0, Number(payload.startSeconds) || 0);
+  const durationSeconds = Number(payload.durationSeconds);
+
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+    throw new Error("자를 길이는 0보다 커야 합니다.");
+  }
+
+  return {
+    id: typeof payload.id === "string" ? payload.id : "",
+    startSeconds,
+    durationSeconds: Math.min(durationSeconds, 60 * 60)
+  };
+}
+
+async function trimSoundFile({ sourcePath, label, startSeconds, durationSeconds }) {
+  const paths = dataPaths();
+  await fsp.mkdir(paths.sounds, { recursive: true });
+
+  const outputName = safeFileName(`${label || "sound"}-trimmed.mp3`);
+  const outputPath = path.join(
+    paths.sounds,
+    `${Date.now()}-${Math.random().toString(16).slice(2)}-${outputName}`
+  );
+  await execFileAsync(
+    resolveFfmpegPath(),
+    [
+      "-y",
+      "-ss",
+      String(startSeconds),
+      "-i",
+      sourcePath,
+      "-t",
+      String(durationSeconds),
+      "-vn",
+      "-codec:a",
+      "libmp3lame",
+      "-q:a",
+      "2",
+      outputPath
+    ],
+    {
+      maxBuffer: 1024 * 1024 * 4,
+      timeout: 120000,
+      windowsHide: true
+    }
+  );
+
+  return outputPath;
 }
 
 function createWindow() {
@@ -189,6 +249,59 @@ function registerIpc() {
     }
 
     return withMediaUrls(next);
+  });
+
+  ipcMain.handle("sound:import-youtube", async (_event, url) => {
+    const paths = dataPaths();
+    const result = await resolveYoutubeAudio({
+      sourceUrl: url,
+      binDir: paths.bin,
+      outputDir: paths.youtube
+    });
+    const sound = await copySoundIntoLibrary(result.filePath, result.title);
+    const next = store.update((state) => addSound(state, sound));
+
+    trimOldYoutubeFiles(paths.youtube).catch(() => {});
+    return withMediaUrls(next);
+  });
+
+  ipcMain.handle("sound:trim", async (_event, payload) => {
+    const { id, startSeconds, durationSeconds } = normalizeTrimPayload(payload);
+    const current = store.read();
+    const sound = current.sounds.find((item) => item.id === id);
+
+    if (!sound || !fs.existsSync(sound.path)) {
+      throw new Error("편집할 사운드 파일을 찾지 못했습니다.");
+    }
+
+    const nextPath = await trimSoundFile({
+      sourcePath: sound.path,
+      label: sound.label,
+      startSeconds,
+      durationSeconds
+    });
+    const next = store.update((state) => updateSound(state, id, { path: nextPath }));
+
+    if (isInsideDirectory(dataPaths().sounds, sound.path) && sound.path !== nextPath) {
+      await fsp.unlink(sound.path).catch(() => {});
+    }
+
+    return withMediaUrls(next);
+  });
+
+  ipcMain.handle("youtube:resolve", async (_event, url) => {
+    const paths = dataPaths();
+    const result = await resolveYoutubeAudio({
+      sourceUrl: url,
+      binDir: paths.bin,
+      outputDir: paths.youtube
+    });
+
+    trimOldYoutubeFiles(paths.youtube).catch(() => {});
+    return {
+      ...result,
+      fileUrl: pathToFileURL(result.filePath).toString()
+    };
   });
 
   ipcMain.handle("log:add", (_event, payload = {}) => {

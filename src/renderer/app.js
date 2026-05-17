@@ -26,11 +26,21 @@ const dom = {
   savePhraseButton: document.querySelector("#savePhraseButton"),
   phraseGrid: document.querySelector("#phraseGrid"),
   emptyPhrases: document.querySelector("#emptyPhrases"),
+  stopSoundsButton: document.querySelector("#stopSoundsButton"),
+  youtubeUrlInput: document.querySelector("#youtubeUrlInput"),
+  playYoutubeButton: document.querySelector("#playYoutubeButton"),
+  saveYoutubeButton: document.querySelector("#saveYoutubeButton"),
   importSoundsButton: document.querySelector("#importSoundsButton"),
   soundGrid: document.querySelector("#soundGrid"),
   emptySounds: document.querySelector("#emptySounds"),
   logGrid: document.querySelector("#logGrid"),
   emptyLogs: document.querySelector("#emptyLogs"),
+  soundEditModal: document.querySelector("#soundEditModal"),
+  soundEditTitle: document.querySelector("#soundEditTitle"),
+  soundEditStartInput: document.querySelector("#soundEditStartInput"),
+  soundEditDurationInput: document.querySelector("#soundEditDurationInput"),
+  saveSoundEditButton: document.querySelector("#saveSoundEditButton"),
+  cancelSoundEditButton: document.querySelector("#cancelSoundEditButton"),
   cableInstallModal: document.querySelector("#cableInstallModal"),
   downloadCableButton: document.querySelector("#downloadCableButton"),
   retryCableButton: document.querySelector("#retryCableButton"),
@@ -56,6 +66,7 @@ let state = {
 const activePlayers = new Set();
 let cableInstallModalDismissed = false;
 let isSpeaking = false;
+let editingSoundId = "";
 
 function setStatus(text, tone = "ready") {
   dom.statusText.textContent = text;
@@ -246,8 +257,8 @@ async function applySink(audio, deviceId) {
   await audio.setSinkId(deviceId);
 }
 
-function trackAudio(audio, role) {
-  const entry = { audio, role };
+function trackAudio(audio, role, kind) {
+  const entry = { audio, role, kind };
   activePlayers.add(entry);
 
   const cleanup = () => activePlayers.delete(entry);
@@ -268,17 +279,18 @@ function updateLiveSendVolume() {
   });
 }
 
-async function playUrl(fileUrl) {
+async function playUrl(fileUrl, options = {}) {
+  const { kind = "sound" } = options;
   const sendAudio = new Audio(fileUrl);
   sendAudio.volume = state.settings.masterVolume;
-  trackAudio(sendAudio, "send");
+  trackAudio(sendAudio, "send", kind);
   await applySink(sendAudio, state.settings.outputDeviceId);
 
   const players = [sendAudio];
   if (state.settings.monitorEnabled && state.settings.outputDeviceId) {
     const monitorAudio = new Audio(fileUrl);
     monitorAudio.volume = 1;
-    trackAudio(monitorAudio, "monitor");
+    trackAudio(monitorAudio, "monitor", kind);
     players.push(monitorAudio);
   }
 
@@ -286,13 +298,27 @@ async function playUrl(fileUrl) {
   setStatus("재생 중", "busy");
 }
 
-function stopAll() {
+function stopMatchingPlayers(predicate, successText, emptyText) {
+  let stopped = 0;
   activePlayers.forEach((entry) => {
+    if (!predicate(entry)) {
+      return;
+    }
+
     entry.audio.pause();
     entry.audio.currentTime = 0;
+    activePlayers.delete(entry);
+    stopped += 1;
   });
-  activePlayers.clear();
-  setStatus("정지됨");
+  setStatus(stopped ? successText : emptyText);
+}
+
+function stopAll() {
+  stopMatchingPlayers(() => true, "정지됨", "정지할 재생 없음");
+}
+
+function stopSounds() {
+  stopMatchingPlayers((entry) => entry.kind === "sound", "사운드 정지됨", "정지할 사운드 없음");
 }
 
 async function setupCableRouting() {
@@ -363,7 +389,7 @@ async function speakText(text, options = {}) {
       text: normalized,
       settings: state.settings
     });
-    await playUrl(result.fileUrl);
+    await playUrl(result.fileUrl, { kind: "tts" });
     state = await VOICEBOARD.addLog({ text: normalized });
     render();
 
@@ -385,6 +411,96 @@ async function speakText(text, options = {}) {
 
 function speakFromComposer() {
   return speakText(dom.ttsText.value, { clearComposer: true });
+}
+
+async function playYoutubeUrl() {
+  const url = dom.youtubeUrlInput.value.trim();
+  if (!url) {
+    setStatus("YouTube 링크를 입력하세요", "error");
+    dom.youtubeUrlInput.focus();
+    return;
+  }
+
+  try {
+    setStatus("YouTube 오디오 불러오는 중", "busy");
+    dom.playYoutubeButton.disabled = true;
+    dom.saveYoutubeButton.disabled = true;
+    const result = await VOICEBOARD.resolveYoutube(url);
+    await playUrl(result.fileUrl, { kind: "sound" });
+    dom.youtubeUrlInput.value = "";
+    setStatus(`YouTube 재생 중: ${result.title}`, "busy");
+  } catch (error) {
+    console.error(error);
+    setStatus("YouTube 재생 실패", "error");
+  } finally {
+    dom.playYoutubeButton.disabled = false;
+    dom.saveYoutubeButton.disabled = false;
+  }
+}
+
+async function saveYoutubeToSoundboard() {
+  const url = dom.youtubeUrlInput.value.trim();
+  if (!url) {
+    setStatus("YouTube 링크를 입력하세요", "error");
+    dom.youtubeUrlInput.focus();
+    return;
+  }
+
+  try {
+    setStatus("YouTube 사운드 저장 중", "busy");
+    dom.playYoutubeButton.disabled = true;
+    dom.saveYoutubeButton.disabled = true;
+    state = await VOICEBOARD.importYoutubeSound(url);
+    render();
+    dom.youtubeUrlInput.value = "";
+    setStatus("YouTube 사운드 추가됨");
+  } catch (error) {
+    console.error(error);
+    setStatus("YouTube 사운드 추가 실패", "error");
+  } finally {
+    dom.playYoutubeButton.disabled = false;
+    dom.saveYoutubeButton.disabled = false;
+  }
+}
+
+function openSoundEditor(sound) {
+  editingSoundId = sound.id;
+  dom.soundEditTitle.textContent = `${sound.label} 편집`;
+  dom.soundEditStartInput.value = "0";
+  dom.soundEditDurationInput.value = "5";
+  dom.soundEditModal.hidden = false;
+  refreshIcons();
+  dom.soundEditStartInput.focus();
+}
+
+function closeSoundEditor() {
+  editingSoundId = "";
+  dom.soundEditModal.hidden = true;
+}
+
+async function saveSoundEdit() {
+  if (!editingSoundId) {
+    closeSoundEditor();
+    return;
+  }
+
+  try {
+    setStatus("사운드 편집 중", "busy");
+    dom.saveSoundEditButton.disabled = true;
+    state = await VOICEBOARD.trimSound({
+      id: editingSoundId,
+      startSeconds: Number(dom.soundEditStartInput.value),
+      durationSeconds: Number(dom.soundEditDurationInput.value)
+    });
+    render();
+    closeSoundEditor();
+    setStatus("사운드 편집 저장됨");
+  } catch (error) {
+    console.error(error);
+    setStatus("사운드 편집 실패", "error");
+  } finally {
+    dom.saveSoundEditButton.disabled = false;
+  }
 }
 
 function renderPhrases() {
@@ -435,17 +551,20 @@ function renderSounds() {
 
     const actions = item.querySelector(".item-actions");
     const playButton = createButton("secondary-button", "play", "실행", "사운드 실행");
+    const editButton = createButton("secondary-button", "scissors", "편집", "사운드 편집");
     const deleteButton = createIconButton("trash-2", "사운드 삭제", true);
 
     playButton.disabled = !sound.exists;
+    editButton.disabled = !sound.exists;
     playButton.addEventListener("click", () => playUrl(sound.fileUrl));
+    editButton.addEventListener("click", () => openSoundEditor(sound));
     deleteButton.addEventListener("click", async () => {
       state = await VOICEBOARD.deleteSound(sound.id);
       render();
       setStatus("사운드 삭제됨");
     });
 
-    actions.append(playButton, deleteButton);
+    actions.append(playButton, editButton, deleteButton);
     dom.soundGrid.append(item);
   });
 }
@@ -501,6 +620,7 @@ function bindEvents() {
   dom.refreshDevicesButton.addEventListener("click", refreshDevices);
   dom.openDataButton.addEventListener("click", () => VOICEBOARD.openDataFolder());
   dom.stopAllButton.addEventListener("click", stopAll);
+  dom.stopSoundsButton.addEventListener("click", stopSounds);
   dom.speakButton.addEventListener("click", speakFromComposer);
   dom.ttsText.addEventListener("keydown", (event) => {
     if (
@@ -522,6 +642,26 @@ function bindEvents() {
   dom.dismissCableButton.addEventListener("click", () => {
     cableInstallModalDismissed = true;
     hideCableInstallModal();
+  });
+  dom.playYoutubeButton.addEventListener("click", playYoutubeUrl);
+  dom.saveYoutubeButton.addEventListener("click", saveYoutubeToSoundboard);
+  dom.youtubeUrlInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      playYoutubeUrl();
+    }
+  });
+  dom.saveSoundEditButton.addEventListener("click", saveSoundEdit);
+  dom.cancelSoundEditButton.addEventListener("click", closeSoundEditor);
+  dom.soundEditModal.addEventListener("click", (event) => {
+    if (event.target === dom.soundEditModal) {
+      closeSoundEditor();
+    }
+  });
+  dom.soundEditModal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeSoundEditor();
+    }
   });
 
   dom.outputDeviceSelect.addEventListener("change", () =>
