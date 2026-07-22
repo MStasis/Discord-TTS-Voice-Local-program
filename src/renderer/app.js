@@ -33,8 +33,6 @@ const dom = {
   importSoundsButton: document.querySelector("#importSoundsButton"),
   soundGrid: document.querySelector("#soundGrid"),
   emptySounds: document.querySelector("#emptySounds"),
-  logGrid: document.querySelector("#logGrid"),
-  emptyLogs: document.querySelector("#emptyLogs"),
   soundEditModal: document.querySelector("#soundEditModal"),
   soundEditTitle: document.querySelector("#soundEditTitle"),
   soundEditStartInput: document.querySelector("#soundEditStartInput"),
@@ -59,8 +57,7 @@ let state = {
     monitorEnabled: true
   },
   phrases: [],
-  sounds: [],
-  logs: []
+  sounds: []
 };
 
 const activePlayers = new Set();
@@ -81,20 +78,6 @@ function signed(value, suffix) {
 
 function percent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
-}
-
-function formatLogTime(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return "시간 정보 없음";
-  }
-
-  return date.toLocaleString("ko-KR", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
 }
 
 function updateControlValues() {
@@ -358,7 +341,14 @@ async function releaseCableRouting() {
     state = result.state;
     state = await VOICEBOARD.updateSettings({ outputDeviceId: "" });
     render();
-    setStatus(result.restored ? "기본 마이크로 복원됨" : "복원할 이전 마이크 없음", "ready");
+    setStatus(
+      result.restored
+        ? result.usedFallback
+          ? "사용 가능한 마이크로 복원됨"
+          : "기본 마이크로 복원됨"
+        : "복원할 마이크 없음",
+      "ready"
+    );
   } catch (error) {
     console.error(error);
     setStatus("VB-CABLE 해제 실패", "error");
@@ -390,8 +380,6 @@ async function speakText(text, options = {}) {
       settings: state.settings
     });
     await playUrl(result.fileUrl, { kind: "tts" });
-    state = await VOICEBOARD.addLog({ text: normalized });
-    render();
 
     if (clearComposer && dom.ttsText.value.trim() === normalized) {
       dom.ttsText.value = "";
@@ -569,50 +557,10 @@ function renderSounds() {
   });
 }
 
-function renderLogs() {
-  dom.logGrid.innerHTML = "";
-  dom.emptyLogs.hidden = state.logs.length > 0;
-
-  state.logs.forEach((log) => {
-    const item = document.createElement("article");
-    item.className = "library-item log-item";
-    item.tabIndex = 0;
-    item.setAttribute("role", "button");
-    item.setAttribute("aria-label", `${log.text} 다시 전송`);
-    item.innerHTML = `
-      <strong></strong>
-      <p></p>
-      <div class="item-actions"></div>
-    `;
-    item.querySelector("strong").textContent = log.text;
-    item.querySelector("p").textContent = formatLogTime(log.createdAt);
-
-    const actions = item.querySelector(".item-actions");
-    const playButton = createButton("secondary-button", "rotate-ccw", "다시 전송", "로그 다시 전송");
-
-    playButton.addEventListener("click", () => speakText(log.text));
-    item.addEventListener("click", (event) => {
-      if (!(event.target instanceof Element && event.target.closest("button"))) {
-        speakText(log.text);
-      }
-    });
-    item.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        speakText(log.text);
-      }
-    });
-
-    actions.append(playButton);
-    dom.logGrid.append(item);
-  });
-}
-
 function render() {
   updateControlValues();
   renderPhrases();
   renderSounds();
-  renderLogs();
   refreshIcons();
 }
 

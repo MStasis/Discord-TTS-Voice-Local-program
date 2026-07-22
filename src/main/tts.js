@@ -329,9 +329,16 @@ async function synthesizeTts({ text, settings, outputDir }) {
   }
 }
 
-async function trimOldTtsFiles(outputDir, keep = 50) {
+async function trimOldTtsFiles(outputDir, options = {}) {
+  const requestedKeep = typeof options === "number" ? options : Number(options.keep ?? 50);
+  const keep = Number.isFinite(requestedKeep) ? requestedKeep : 50;
+  const maxAgeMs =
+    typeof options === "object" && Number.isFinite(Number(options.maxAgeMs))
+      ? Number(options.maxAgeMs)
+      : Infinity;
   try {
     const entries = await fs.readdir(outputDir, { withFileTypes: true });
+    const now = Date.now();
     const files = await Promise.all(
       entries
         .filter((entry) => entry.isFile() && (entry.name.endsWith(".mp3") || entry.name.endsWith(".wav")))
@@ -342,11 +349,11 @@ async function trimOldTtsFiles(outputDir, keep = 50) {
         })
     );
 
-    const oldFiles = files
-      .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      .slice(keep);
+    const byCount = files.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(Math.max(0, keep));
+    const byAge = files.filter((file) => now - file.mtimeMs > maxAgeMs);
+    const oldFiles = new Map([...byCount, ...byAge].map((file) => [file.filePath, file]));
 
-    await Promise.allSettled(oldFiles.map((file) => fs.unlink(file.filePath)));
+    await Promise.allSettled([...oldFiles.values()].map((file) => fs.unlink(file.filePath)));
   } catch (error) {
     if (error.code !== "ENOENT") {
       console.warn("Failed to trim old TTS files:", error);

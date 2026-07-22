@@ -10,7 +10,6 @@ contextBridge.exposeInMainWorld("voiceboard", {
   trimSound: (payload) => ipcRenderer.invoke("sound:trim", payload),
   deleteSound: (id) => ipcRenderer.invoke("sound:delete", id),
   resolveYoutube: (url) => ipcRenderer.invoke("youtube:resolve", url),
-  addLog: (payload) => ipcRenderer.invoke("log:add", payload),
   synthesizeTts: (payload) => ipcRenderer.invoke("tts:synthesize", payload),
   getCableStatus: () => ipcRenderer.invoke("audio:get-cable-status"),
   setupCableAudio: () => ipcRenderer.invoke("audio:setup-cable"),

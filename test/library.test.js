@@ -1,7 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const os = require("node:os");
+const path = require("node:path");
 const {
-  addLog,
   addPhrase,
   addSound,
   normalizeState,
@@ -13,7 +15,8 @@ const {
   updateSound,
   updateSettings
 } = require("../src/shared/library.cjs");
-const { createSsmlMessage } = require("../src/main/tts");
+const { createSsmlMessage, trimOldTtsFiles } = require("../src/main/tts");
+const { buildRestoreRoles } = require("../src/main/windowsAudio");
 const { isSupportedYoutubeUrl, parseYtDlpOutput, resolveFfmpegPath } = require("../src/main/youtube");
 
 test("normalizes damaged state into a usable library", () => {
@@ -34,10 +37,7 @@ test("normalizes damaged state into a usable library", () => {
     },
     phrases: [{ id: "a", label: "  Hello   there  ", text: "  hello  " }, { text: "" }],
     sounds: [{ id: "s", label: "", path: "C:/sounds/ping.mp3" }, { label: "no-path" }],
-    logs: [
-      { id: "l", text: "  sent text  ", createdAt: "2026-05-11T00:00:00.000Z" },
-      { id: "empty", text: "" }
-    ]
+    logs: [{ id: "l", text: "previous logs are ignored" }]
   });
 
   assert.equal(state.version, 1);
@@ -55,9 +55,7 @@ test("normalizes damaged state into a usable library", () => {
   assert.deepEqual(state.phrases, [{ id: "a", label: "Hello there", text: "hello" }]);
   assert.equal(state.sounds.length, 1);
   assert.equal(state.sounds[0].label, "ping");
-  assert.deepEqual(state.logs, [
-    { id: "l", text: "sent text", createdAt: "2026-05-11T00:00:00.000Z" }
-  ]);
+  assert.equal(Object.hasOwn(state, "logs"), false);
 });
 
 test("adds and removes quick phrases", () => {
@@ -102,28 +100,6 @@ test("updates soundboard entries", () => {
   assert.equal(updated.sounds[0].id, "sound-1");
   assert.equal(updated.sounds[0].label, "Ping Trimmed");
   assert.equal(updated.sounds[0].path, "C:/sounds/ping-trimmed.mp3");
-});
-
-test("adds sent voice logs newest first and keeps the configured limit", () => {
-  const initial = normalizeState({
-    logs: [{ id: "old", text: "old text", createdAt: "2026-05-10T00:00:00.000Z" }]
-  });
-  const withLogs = addLog(
-    initial,
-    { id: "new", text: "  new text  ", createdAt: "2026-05-11T00:00:00.000Z" },
-    2
-  );
-  const capped = addLog(
-    withLogs,
-    { id: "latest", text: "latest text", createdAt: "2026-05-12T00:00:00.000Z" },
-    2
-  );
-
-  assert.deepEqual(
-    capped.logs.map((log) => log.id),
-    ["latest", "new"]
-  );
-  assert.equal(capped.logs[1].text, "new text");
 });
 
 test("formats Edge TTS controls", () => {
@@ -174,3 +150,82 @@ test("parses yt-dlp title and converted mp3 filepath output", () => {
 test("finds the bundled ffmpeg binary", () => {
   assert.match(resolveFfmpegPath(), /ffmpeg(\.exe)?$/);
 });
+
+test("builds release fallback roles when saved mic backup is stale", () => {
+  const restore = buildRestoreRoles(
+    {
+      console: "missing-device",
+      multimedia: "missing-device",
+      communications: "missing-device"
+    },
+    [
+      { id: "real-mic", name: "Headset Microphone" },
+      { id: "cable", name: "CABLE Output(VB-Audio Virtual Cable)" }
+    ],
+    {
+      console: "cable",
+      multimedia: "cable",
+      communications: "cable"
+    }
+  );
+
+  assert.deepEqual(restore.roles, {
+    console: "real-mic",
+    multimedia: "real-mic",
+    communications: "real-mic"
+  });
+  assert.equal(restore.usedFallback, true);
+});
+
+test("uses an available mic when releasing from cable without a backup", () => {
+  const restore = buildRestoreRoles(
+    {},
+    [
+      { id: "real-mic", name: "Headset Microphone" },
+      { id: "cable", name: "CABLE Output(VB-Audio Virtual Cable)" }
+    ],
+    {
+      console: "cable",
+      multimedia: "cable",
+      communications: "cable"
+    }
+  );
+
+  assert.deepEqual(restore.roles, {
+    console: "real-mic",
+    multimedia: "real-mic",
+    communications: "real-mic"
+  });
+  assert.equal(restore.usedFallback, true);
+});
+
+test("periodically trims generated TTS files by count and age", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "voiceboard-tts-"));
+  const oldFile = path.join(root, "old.mp3");
+  const keepFile = path.join(root, "keep.mp3");
+  const countFile = path.join(root, "count.wav");
+
+  await fs.writeFile(oldFile, "old");
+  await fs.writeFile(keepFile, "keep");
+  await fs.writeFile(countFile, "count");
+
+  const oldDate = new Date(Date.now() - 10_000);
+  await fs.utimes(oldFile, oldDate, oldDate);
+  await fs.utimes(keepFile, new Date(), new Date());
+  await fs.utimes(countFile, new Date(Date.now() - 1_000), new Date(Date.now() - 1_000));
+
+  await trimOldTtsFiles(root, { keep: 1, maxAgeMs: 5_000 });
+
+  assert.equal(await exists(oldFile), false);
+  assert.equal(await exists(keepFile), true);
+  assert.equal(await exists(countFile), false);
+});
+
+async function exists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}

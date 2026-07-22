@@ -274,15 +274,61 @@ function hasCaptureBackup(backup = {}) {
   return ROLE_KEYS.some((key) => typeof backup[key] === "string" && backup[key].trim());
 }
 
+function isCableCaptureDevice(device) {
+  const label = String(device && device.name ? device.name : "").toLowerCase();
+  return (
+    label.includes("cable output") ||
+    label.includes("vb-audio virtual cable") ||
+    label.includes("vb-cable")
+  );
+}
+
 function findCableCaptureDevice(devices = []) {
-  return devices.find((device) => {
-    const label = String(device.name || "").toLowerCase();
-    return (
-      label.includes("cable output") ||
-      label.includes("vb-audio virtual cable") ||
-      label.includes("vb-cable")
-    );
-  });
+  return devices.find(isCableCaptureDevice);
+}
+
+function findNonCableCaptureDevice(devices = []) {
+  return devices.find((device) => !isCableCaptureDevice(device));
+}
+
+function createDeviceLookup(devices = []) {
+  return new Map(devices.map((device) => [device.id, device]));
+}
+
+function isUsableRestoreDevice(device) {
+  return Boolean(device && !isCableCaptureDevice(device));
+}
+
+function buildRestoreRoles(backup = {}, captureDevices = [], defaults = {}) {
+  const lookup = createDeviceLookup(captureDevices);
+  const fallback = findNonCableCaptureDevice(captureDevices);
+  const roles = {};
+  let usedFallback = false;
+
+  for (const key of ROLE_KEYS) {
+    const backupId = typeof backup[key] === "string" ? backup[key].trim() : "";
+    const defaultId = typeof defaults[key] === "string" ? defaults[key].trim() : "";
+    const backupDevice = lookup.get(backupId);
+    const defaultDevice = lookup.get(defaultId);
+
+    if (isUsableRestoreDevice(backupDevice)) {
+      roles[key] = backupId;
+    } else if (isUsableRestoreDevice(defaultDevice)) {
+      roles[key] = defaultId;
+      usedFallback = Boolean(backupId);
+    } else if (fallback) {
+      roles[key] = fallback.id;
+      usedFallback = true;
+    } else {
+      roles[key] = "";
+    }
+  }
+
+  return {
+    roles,
+    usedFallback,
+    fallback
+  };
 }
 
 async function runAudioScript(action, roles = null) {
@@ -331,7 +377,8 @@ async function setupCableCaptureDefaults(existingBackup) {
     throw new Error("VB-CABLE capture device was not found. Expected CABLE Output.");
   }
 
-  const backup = hasCaptureBackup(existingBackup) ? existingBackup : snapshot.defaults;
+  const restore = buildRestoreRoles(existingBackup, snapshot.captureDevices, snapshot.defaults);
+  const backup = ROLE_KEYS.some((key) => restore.roles[key]) ? restore.roles : snapshot.defaults;
   const targetRoles = Object.fromEntries(ROLE_KEYS.map((key) => [key, target.id]));
   const after = await runAudioScript("set", targetRoles);
 
@@ -343,24 +390,40 @@ async function setupCableCaptureDefaults(existingBackup) {
 }
 
 async function restoreCaptureDefaults(backup) {
-  if (!hasCaptureBackup(backup)) {
+  const snapshot = await getCaptureSnapshot();
+  const restore = buildRestoreRoles(backup, snapshot.captureDevices, snapshot.defaults);
+  const hasRestoreTarget = ROLE_KEYS.some((key) => restore.roles[key]);
+
+  if (!hasCaptureBackup(backup) && !hasRestoreTarget) {
     return {
       restored: false,
-      defaults: (await getCaptureSnapshot()).defaults
+      defaults: snapshot.defaults
     };
   }
 
-  const after = await runAudioScript("set", backup);
+  if (!hasRestoreTarget) {
+    return {
+      restored: false,
+      defaults: snapshot.defaults
+    };
+  }
+
+  const after = await runAudioScript("set", restore.roles);
   return {
     restored: true,
+    usedFallback: restore.usedFallback,
+    fallback: restore.fallback || null,
     defaults: after.defaults
   };
 }
 
 module.exports = {
+  buildRestoreRoles,
   findCableCaptureDevice,
+  findNonCableCaptureDevice,
   getCaptureSnapshot,
   hasCaptureBackup,
+  isCableCaptureDevice,
   restoreCaptureDefaults,
   setupCableCaptureDefaults
 };

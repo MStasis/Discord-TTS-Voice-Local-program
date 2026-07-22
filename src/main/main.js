@@ -7,7 +7,6 @@ const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const {
-  addLog,
   addPhrase,
   addSound,
   normalizeState,
@@ -32,8 +31,12 @@ const execFileAsync = promisify(execFile);
 
 let mainWindow;
 let store;
+let generatedVoiceCleanupTimer;
 const isSmokeRun = process.env.VOICEBOARD_SMOKE === "1";
 const screenshotPath = process.env.VOICEBOARD_SCREENSHOT || "";
+const GENERATED_VOICE_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
+const GENERATED_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const GENERATED_VOICE_KEEP_COUNT = 20;
 
 function createId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -136,6 +139,23 @@ async function trimSoundFile({ sourcePath, label, startSeconds, durationSeconds 
   );
 
   return outputPath;
+}
+
+function cleanupGeneratedVoiceFiles() {
+  return trimOldTtsFiles(dataPaths().tts, {
+    keep: GENERATED_VOICE_KEEP_COUNT,
+    maxAgeMs: GENERATED_VOICE_MAX_AGE_MS
+  });
+}
+
+function startGeneratedVoiceCleanup() {
+  cleanupGeneratedVoiceFiles().catch(() => {});
+  generatedVoiceCleanupTimer = setInterval(() => {
+    cleanupGeneratedVoiceFiles().catch(() => {});
+  }, GENERATED_VOICE_CLEANUP_INTERVAL_MS);
+  if (typeof generatedVoiceCleanupTimer.unref === "function") {
+    generatedVoiceCleanupTimer.unref();
+  }
 }
 
 function createWindow() {
@@ -304,19 +324,6 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("log:add", (_event, payload = {}) => {
-    const text = typeof payload.text === "string" ? payload.text.trim() : "";
-    const next = store.update((state) =>
-      addLog(state, {
-        id: createId("log"),
-        text,
-        createdAt: new Date().toISOString()
-      })
-    );
-
-    return withMediaUrls(next);
-  });
-
   ipcMain.handle("tts:synthesize", async (_event, payload) => {
     const state = store.read();
     const settings = updateSettings(state, payload.settings || {}).settings;
@@ -326,7 +333,7 @@ function registerIpc() {
       outputDir: dataPaths().tts
     });
 
-    trimOldTtsFiles(dataPaths().tts).catch(() => {});
+    cleanupGeneratedVoiceFiles().catch(() => {});
     return {
       engine: result.engine,
       filePath: result.filePath,
@@ -392,6 +399,8 @@ function registerIpc() {
 app.whenReady().then(() => {
   const paths = dataPaths();
   store = new LibraryStore(paths.library);
+  store.write(store.read());
+  startGeneratedVoiceCleanup();
   registerIpc();
   createWindow();
 
@@ -403,6 +412,9 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  if (generatedVoiceCleanupTimer) {
+    clearInterval(generatedVoiceCleanupTimer);
+  }
   if (process.platform !== "darwin") {
     app.quit();
   }
