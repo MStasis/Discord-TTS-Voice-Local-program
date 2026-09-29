@@ -34,8 +34,8 @@
             <span>TTS</span>
           </a>
           <a href="#phrases-panel" class="nav-item">
-            <i data-lucide="bookmark"></i>
-            <span>문장</span>
+            <i data-lucide="history"></i>
+            <span>최근 대화</span>
           </a>
           <a href="#sounds-panel" class="nav-item">
             <i data-lucide="music-2"></i>
@@ -138,24 +138,17 @@
             </label>
           </div>
 
-          <div class="save-row">
-            <input id="phraseLabel" type="text" placeholder="버튼 이름" />
-            <button class="secondary-button" id="savePhraseButton" type="button">
-              <i data-lucide="plus"></i>
-              <span>문장 저장</span>
-            </button>
-          </div>
         </section>
 
         <section class="library-section" id="phrases-panel">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Quick phrases</p>
-              <h3>자주 쓰는 문장</h3>
+              <p class="eyebrow">Recent conversations</p>
+              <h3>최근 대화</h3>
             </div>
           </div>
           <div class="item-grid" id="phraseGrid"></div>
-          <p class="empty-state" id="emptyPhrases">저장된 문장이 없습니다.</p>
+          <p class="empty-state" id="emptyPhrases">최근 대화가 없습니다.</p>
         </section>
 
         <section class="library-section" id="sounds-panel">

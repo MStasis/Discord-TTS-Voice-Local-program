@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld("voiceboard", {
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
   addPhrase: (payload) => ipcRenderer.invoke("phrase:add", payload),
   deletePhrase: (id) => ipcRenderer.invoke("phrase:delete", id),
+  addRecentPhrase: (text) => ipcRenderer.invoke("recent:add", text),
+  deleteRecentPhrase: (id) => ipcRenderer.invoke("recent:delete", id),
   importSounds: () => ipcRenderer.invoke("sound:import"),
   importYoutubeSound: (url) => ipcRenderer.invoke("sound:import-youtube", url),
   trimSound: (payload) => ipcRenderer.invoke("sound:trim", payload),

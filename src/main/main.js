@@ -8,9 +8,11 @@ const { promisify } = require("node:util");
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
 const {
   addPhrase,
+  addRecentPhrase,
   addSound,
   normalizeState,
   removePhrase,
+  removeRecentPhrase,
   removeSound,
   safeFileName,
   safeLabel,
@@ -18,6 +20,7 @@ const {
   updateSettings
 } = require("../shared/library.cjs");
 const { LibraryStore } = require("./store");
+const { applyDiscordVoiceProfile } = require("./discordVoice");
 const { synthesizeTts, trimOldTtsFiles } = require("./tts");
 const {
   findCableCaptureDevice,
@@ -234,6 +237,17 @@ function registerIpc() {
     return withMediaUrls(next);
   });
 
+  ipcMain.handle("recent:add", (_event, text) => {
+    const next = store.update((state) => addRecentPhrase(state, {
+      id: createId("recent"), text
+    }));
+    return next.recentPhrases;
+  });
+
+  ipcMain.handle("recent:delete", (_event, id) => {
+    return store.update((state) => removeRecentPhrase(state, id)).recentPhrases;
+  });
+
   ipcMain.handle("sound:import", async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: "Add soundboard audio",
@@ -350,10 +364,8 @@ function registerIpc() {
       })
     );
 
-    return {
-      ...result,
-      state: withMediaUrls(next)
-    };
+    const discord = await applyDiscordVoiceProfile("setup");
+    return { ...result, discord, state: withMediaUrls(next) };
   });
 
   ipcMain.handle("audio:get-cable-status", async () => {
@@ -379,10 +391,8 @@ function registerIpc() {
       })
     );
 
-    return {
-      ...result,
-      state: withMediaUrls(next)
-    };
+    const discord = await applyDiscordVoiceProfile("release");
+    return { ...result, discord, state: withMediaUrls(next) };
   });
 
   ipcMain.handle("app:open-data-folder", async () => {

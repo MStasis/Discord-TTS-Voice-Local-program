@@ -5,9 +5,11 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   addPhrase,
+  addRecentPhrase,
   addSound,
   normalizeState,
   removePhrase,
+  removeRecentPhrase,
   removeSound,
   safeFileName,
   toEdgePercent,
@@ -70,6 +72,20 @@ test("adds and removes quick phrases", () => {
 
   const removed = removePhrase(withPhrase, "phrase-1");
   assert.equal(removed.phrases.length, 0);
+});
+
+test("keeps only three recent conversations across reloads without reviving old logs", () => {
+  let state = normalizeState({ phrases: [{ id: "saved", text: "existing saved phrase" }] });
+  for (let i = 1; i <= 5; i++) {
+    state = addRecentPhrase(state, { id: `recent-${i}`, text: `message ${i}` });
+  }
+  const reloaded = normalizeState(JSON.parse(JSON.stringify(state)));
+  assert.deepEqual(reloaded.recentPhrases.map((item) => item.text), ["message 5", "message 4", "message 3"]);
+  assert.equal(reloaded.phrases[0].text, "existing saved phrase");
+  assert.equal(Object.hasOwn(reloaded, "logs"), false);
+  assert.equal(removeRecentPhrase(reloaded, "recent-4").recentPhrases.length, 2);
+  assert.deepEqual(addRecentPhrase(reloaded, { id: "empty", text: "  " }), reloaded);
+  assert.equal(normalizeState({ recentPhrases: [{ text: "missing id" }] }).recentPhrases.length, 0);
 });
 
 test("adds and removes soundboard entries", () => {

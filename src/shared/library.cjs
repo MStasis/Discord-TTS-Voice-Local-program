@@ -20,6 +20,7 @@ const DEFAULT_STATE = Object.freeze({
   version: 1,
   settings: DEFAULT_SETTINGS,
   phrases: [],
+  recentPhrases: [],
   sounds: []
 });
 
@@ -121,6 +122,9 @@ function normalizeState(input = {}) {
     version: 1,
     settings: normalizeSettings(input.settings),
     phrases,
+    recentPhrases: Array.isArray(input.recentPhrases)
+      ? input.recentPhrases.map(normalizePhrase).filter((item) => item && item.id).slice(0, 3)
+      : [],
     sounds
   };
 }
@@ -157,6 +161,21 @@ function removePhrase(state, id) {
   });
 }
 
+function addRecentPhrase(state, phrase) {
+  const current = normalizeState(state);
+  const normalized = normalizePhrase(phrase);
+  if (!normalized || !normalized.id) return current;
+  return normalizeState({ ...current, recentPhrases: [normalized, ...current.recentPhrases] });
+}
+
+function removeRecentPhrase(state, id) {
+  const current = normalizeState(state);
+  return normalizeState({
+    ...current,
+    recentPhrases: current.recentPhrases.filter((item) => item.id !== id)
+  });
+}
+
 function addSound(state, sound) {
   const current = normalizeState(state);
   const normalized = normalizeSound(sound);
@@ -190,9 +209,11 @@ module.exports = {
   DEFAULT_SETTINGS,
   DEFAULT_STATE,
   addPhrase,
+  addRecentPhrase,
   addSound,
   normalizeState,
   removePhrase,
+  removeRecentPhrase,
   removeSound,
   safeFileName,
   safeLabel,

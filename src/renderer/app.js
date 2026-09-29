@@ -22,8 +22,6 @@ const dom = {
   rateValue: document.querySelector("#rateValue"),
   pitchValue: document.querySelector("#pitchValue"),
   ttsVolumeValue: document.querySelector("#ttsVolumeValue"),
-  phraseLabel: document.querySelector("#phraseLabel"),
-  savePhraseButton: document.querySelector("#savePhraseButton"),
   phraseGrid: document.querySelector("#phraseGrid"),
   emptyPhrases: document.querySelector("#emptyPhrases"),
   stopSoundsButton: document.querySelector("#stopSoundsButton"),
@@ -57,6 +55,7 @@ let state = {
     monitorEnabled: true
   },
   phrases: [],
+  recentPhrases: [],
   sounds: []
 };
 
@@ -320,7 +319,10 @@ async function setupCableRouting() {
     const result = await VOICEBOARD.setupCableAudio();
     state = result.state;
     render();
-    setStatus(`세팅 완료: ${result.target.name}`, "ready");
+    setStatus(
+      result.discord.applied ? "세팅 완료: 잡음 없음 · 에코 끔 · 감도 -95dB" : `케이블 세팅됨 · ${result.discord.message}`,
+      result.discord.applied ? "ready" : "error"
+    );
   } catch (error) {
     console.error(error);
     showCableInstallModal();
@@ -341,13 +343,12 @@ async function releaseCableRouting() {
     state = result.state;
     state = await VOICEBOARD.updateSettings({ outputDeviceId: "" });
     render();
+    const routingStatus = result.restored ? "기본 마이크로 복원됨" : "복원할 마이크 없음";
     setStatus(
-      result.restored
-        ? result.usedFallback
-          ? "사용 가능한 마이크로 복원됨"
-          : "기본 마이크로 복원됨"
-        : "복원할 마이크 없음",
-      "ready"
+      result.discord.applied
+        ? `${routingStatus} · Krisp · 에코 켬 · 감도 -55dB`
+        : `${routingStatus} · ${result.discord.message}`,
+      result.restored && result.discord.applied ? "ready" : "error"
     );
   } catch (error) {
     console.error(error);
@@ -368,7 +369,14 @@ async function speakText(text, options = {}) {
   }
 
   if (isSpeaking) {
+    setStatus("이전 음성 생성 중 · 입력한 문장은 유지됩니다", "busy");
     return;
+  }
+
+  const submittedDraft = clearComposer ? dom.ttsText.value : "";
+  if (clearComposer) {
+    dom.ttsText.value = "";
+    dom.ttsText.focus();
   }
 
   try {
@@ -381,8 +389,13 @@ async function speakText(text, options = {}) {
     });
     await playUrl(result.fileUrl, { kind: "tts" });
 
-    if (clearComposer && dom.ttsText.value.trim() === normalized) {
-      dom.ttsText.value = "";
+    try {
+      state.recentPhrases = await VOICEBOARD.addRecentPhrase(normalized);
+      renderPhrases();
+      refreshIcons();
+    } catch (error) {
+      console.error(error);
+      setStatus("음성 재생됨 · 최근 대화 저장 실패", "error");
     }
 
     if (result.engine === "windows-fallback") {
@@ -390,6 +403,12 @@ async function speakText(text, options = {}) {
     }
   } catch (error) {
     console.error(error);
+    if (clearComposer) {
+      // Keep both the failed submission and any draft typed while synthesis was pending.
+      dom.ttsText.value = dom.ttsText.value
+        ? `${submittedDraft}\n${dom.ttsText.value}`
+        : submittedDraft;
+    }
     setStatus("TTS 생성 실패", "error");
   } finally {
     isSpeaking = false;
@@ -493,9 +512,9 @@ async function saveSoundEdit() {
 
 function renderPhrases() {
   dom.phraseGrid.innerHTML = "";
-  dom.emptyPhrases.hidden = state.phrases.length > 0;
+  dom.emptyPhrases.hidden = state.recentPhrases.length > 0;
 
-  state.phrases.forEach((phrase) => {
+  state.recentPhrases.forEach((phrase) => {
     const item = document.createElement("article");
     item.className = "library-item";
     item.innerHTML = `
@@ -507,14 +526,15 @@ function renderPhrases() {
     item.querySelector("p").textContent = phrase.text;
 
     const actions = item.querySelector(".item-actions");
-    const playButton = createButton("secondary-button", "play", "실행", "문장 실행");
-    const deleteButton = createIconButton("trash-2", "문장 삭제", true);
+    const playButton = createButton("secondary-button", "play", "다시 전송", "다시 전송");
+    const deleteButton = createIconButton("trash-2", "최근 대화 삭제", true);
 
     playButton.addEventListener("click", () => speakText(phrase.text));
     deleteButton.addEventListener("click", async () => {
-      state = await VOICEBOARD.deletePhrase(phrase.id);
-      render();
-      setStatus("문장 삭제됨");
+      state.recentPhrases = await VOICEBOARD.deleteRecentPhrase(phrase.id);
+      renderPhrases();
+      refreshIcons();
+      setStatus("최근 대화 삭제됨");
     });
 
     actions.append(playButton, deleteButton);
@@ -577,7 +597,9 @@ function bindEvents() {
       !event.ctrlKey &&
       !event.altKey &&
       !event.metaKey &&
-      !event.isComposing
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      !event.repeat
     ) {
       event.preventDefault();
       speakFromComposer();
@@ -631,22 +653,6 @@ function bindEvents() {
   dom.ttsVolumeInput.addEventListener("input", () =>
     saveSettings({ ttsVolume: Number(dom.ttsVolumeInput.value) })
   );
-
-  dom.savePhraseButton.addEventListener("click", async () => {
-    const text = dom.ttsText.value.trim();
-    if (!text) {
-      setStatus("저장할 문장이 필요함", "error");
-      return;
-    }
-
-    state = await VOICEBOARD.addPhrase({
-      label: dom.phraseLabel.value,
-      text
-    });
-    dom.phraseLabel.value = "";
-    render();
-    setStatus("문장 저장됨");
-  });
 
   dom.importSoundsButton.addEventListener("click", async () => {
     state = await VOICEBOARD.importSounds();
