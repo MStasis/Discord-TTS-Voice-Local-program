@@ -4,6 +4,7 @@ const path = require("node:path");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { WebSocket } = require("ws");
+const { synthesizeAzureAudio } = require("./azureTts");
 const { toEdgePercent, toEdgePitch } = require("../shared/library.cjs");
 
 const execFileAsync = promisify(execFile);
@@ -106,23 +107,26 @@ function createSpeechConfigMessage() {
   ].join("\r\n");
 }
 
-function createSsmlMessage(text, settings) {
+function createSsmlDocument(text, settings) {
   const voice = settings.voice || "ko-KR-SunHiNeural";
   const lang = localeFromVoice(voice);
-  const ssml =
+  return (
     `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='${lang}'>` +
     `<voice name='${escapeXml(voice)}'>` +
     `<prosody pitch='${toEdgePitch(settings.pitch)}' rate='${toEdgePercent(settings.rate)}' ` +
     `volume='${toEdgePercent(settings.ttsVolume)}'>${escapeXml(text)}</prosody>` +
-    "</voice></speak>";
+    "</voice></speak>"
+  );
+}
 
+function createSsmlMessage(text, settings) {
   return [
     `X-RequestId:${requestId()}`,
     "Content-Type:application/ssml+xml",
     `X-Timestamp:${edgeDateString()}Z`,
     "Path:ssml",
     "",
-    ssml
+    createSsmlDocument(text, settings)
   ].join("\r\n");
 }
 
@@ -149,10 +153,7 @@ function synthesizeMp3Buffer(text, settings) {
       }
     });
 
-    const timeout = setTimeout(() => {
-      websocket.close();
-      reject(new Error("TTS request timed out."));
-    }, 30000);
+    const timeout = setTimeout(() => settle(new Error("TTS request timed out.")), 30000);
 
     const audioData = [];
     let settled = false;
@@ -163,7 +164,8 @@ function synthesizeMp3Buffer(text, settings) {
       }
       settled = true;
       clearTimeout(timeout);
-      websocket.close();
+      if (error) websocket.terminate();
+      else websocket.close();
 
       if (error) {
         reject(error);
@@ -207,7 +209,13 @@ function synthesizeMp3Buffer(text, settings) {
       }
 
       const data = Buffer.from(rawData);
-      const parsed = parseBinaryMessage(data);
+      let parsed;
+      try {
+        parsed = parseBinaryMessage(data);
+      } catch (error) {
+        settle(error);
+        return;
+      }
       if (parsed.headers.get("path") !== "audio") {
         return;
       }
@@ -225,10 +233,16 @@ function synthesizeMp3Buffer(text, settings) {
       audioData.push(parsed.payload);
     });
 
+    websocket.on("unexpected-response", (_request, response) => {
+      const error = new Error(`TTS server returned HTTP ${response.statusCode}.`);
+      error.statusCode = response.statusCode;
+      response.resume();
+      settle(error);
+    });
     websocket.on("error", (error) => settle(error));
     websocket.on("close", () => {
-      if (!settled && audioData.length === 0) {
-        settle(new Error("TTS connection closed before audio arrived."));
+      if (!settled) {
+        settle(new Error("TTS connection closed before synthesis finished."));
       }
     });
   });
@@ -303,7 +317,16 @@ async function synthesizeWithWindowsSapi({ text, settings, outputDir }) {
   return filePath;
 }
 
-async function synthesizeTts({ text, settings, outputDir }) {
+async function synthesizeTts({ text, settings, outputDir, azure }) {
+  if (settings.ttsEngine === "azure") {
+    const normalizedText = typeof text === "string" ? text.trim() : "";
+    if (!normalizedText || normalizedText.length > 4000) throw new Error("1~4000자의 문장을 입력하세요.");
+    const buffer = await synthesizeAzureAudio({ credentials: azure, ssml: createSsmlDocument(normalizedText, settings) });
+    await fs.mkdir(outputDir, { recursive: true });
+    const filePath = path.join(outputDir, `tts-${Date.now()}-${crypto.randomUUID()}.mp3`);
+    await fs.writeFile(filePath, buffer);
+    return { engine: "azure", filePath };
+  }
   if (settings.ttsEngine === "windows") {
     return {
       engine: "windows",
@@ -317,15 +340,11 @@ async function synthesizeTts({ text, settings, outputDir }) {
       filePath: await synthesizeWithEdgeTts({ text, settings, outputDir })
     };
   } catch (error) {
-    if (process.platform !== "win32") {
-      throw error;
-    }
-
-    console.warn("Edge Neural TTS failed, falling back to Windows SAPI:", error);
-    return {
-      engine: "windows-fallback",
-      filePath: await synthesizeWithWindowsSapi({ text, settings, outputDir })
-    };
+    // SAPI cannot reproduce the selected Neural voice. Never substitute it silently.
+    const status = Number.isInteger(error.statusCode) ? ` (HTTP ${error.statusCode})` : "";
+    const unavailable = new Error(`TTS_VOICE_UNAVAILABLE: Selected online voice is unavailable${status}.`, { cause: error });
+    unavailable.code = "TTS_VOICE_UNAVAILABLE";
+    throw unavailable;
   }
 }
 
@@ -362,6 +381,7 @@ async function trimOldTtsFiles(outputDir, options = {}) {
 }
 
 module.exports = {
+  createSsmlDocument,
   createSsmlMessage,
   generateSecMsGec,
   synthesizeMp3Buffer,

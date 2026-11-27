@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { promisify } = require("node:util");
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, shell, screen, Tray, Menu, nativeImage, safeStorage } = require("electron");
 const {
   addPhrase,
   addRecentPhrase,
@@ -20,6 +20,10 @@ const {
   updateSettings
 } = require("../shared/library.cjs");
 const { LibraryStore } = require("./store");
+const { AzureCredentialStore } = require("./azureCredentials");
+const { checkAzureConnection } = require("./azureTts");
+const { SpeechOverlay } = require("./overlay");
+const { TrayController } = require("./tray");
 const { applyDiscordVoiceProfile } = require("./discordVoice");
 const { synthesizeTts, trimOldTtsFiles } = require("./tts");
 const {
@@ -34,9 +38,17 @@ const execFileAsync = promisify(execFile);
 
 let mainWindow;
 let store;
+let azureCredentials;
 let generatedVoiceCleanupTimer;
+let speechOverlay;
+let trayController;
+let startupWarning = "";
 const isSmokeRun = process.env.VOICEBOARD_SMOKE === "1";
 const screenshotPath = process.env.VOICEBOARD_SCREENSHOT || "";
+const backgroundFeaturesEnabled = !isSmokeRun && !screenshotPath;
+const hasInstanceLock = !backgroundFeaturesEnabled || app.requestSingleInstanceLock();
+if (!hasInstanceLock) app.quit();
+app.on("second-instance", () => trayController?.restore());
 const GENERATED_VOICE_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
 const GENERATED_VOICE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const GENERATED_VOICE_KEEP_COUNT = 20;
@@ -163,18 +175,34 @@ function startGeneratedVoiceCleanup() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1220,
-    height: 820,
-    minWidth: 940,
-    minHeight: 680,
+    width: 1120,
+    height: 760,
+    minWidth: 800,
+    minHeight: 640,
+    autoHideMenuBar: true,
     show: !isSmokeRun && !screenshotPath,
-    backgroundColor: "#f7f8fa",
+    backgroundColor: "#ffffff",
     title: "Voiceboard",
+    icon: path.join(__dirname, "../assets/app-icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "../preload.cjs"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      autoplayPolicy: "no-user-gesture-required"
     }
+  });
+
+  mainWindow.webContents.on("did-start-loading", () => speechOverlay?.setReady(false));
+  mainWindow.webContents.on("render-process-gone", () => speechOverlay?.setReady(false));
+  mainWindow.on("close", (event) => trayController?.handleClose(event));
+  mainWindow.on("closed", () => {
+    speechOverlay?.dispose();
+    trayController?.dispose();
+  });
+  mainWindow.on("query-session-end", () => {
+    trayController?.beginQuit();
+    speechOverlay?.dispose();
   });
 
   mainWindow.webContents.once("did-finish-load", () => {
@@ -213,11 +241,33 @@ function createWindow() {
 }
 
 function registerIpc() {
+  ipcMain.handle("overlay:submit", (event, text) => {
+    if (event.sender !== speechOverlay?.window.webContents) throw new Error("Invalid overlay sender.");
+    return speechOverlay.submit(text);
+  });
+  ipcMain.on("overlay:dismiss", (event) => {
+    if (event.sender === speechOverlay?.window.webContents) speechOverlay.hide();
+  });
+  ipcMain.handle("overlay:renderer-ready", async (event) => {
+    if (event.sender !== mainWindow.webContents) throw new Error("Invalid playback sender.");
+    speechOverlay.setReady(true);
+    await speechOverlay.shortcutReady;
+    return { registered: speechOverlay.registered, startupWarning };
+  });
+  ipcMain.on("overlay:result", (event, result) => {
+    if (event.sender === mainWindow.webContents && result) speechOverlay.complete(result);
+  });
   ipcMain.handle("library:get", () => withMediaUrls(store.read()));
 
   ipcMain.handle("settings:update", (_event, patch) => {
-    const next = store.update((state) => updateSettings(state, patch));
-    return withMediaUrls(next);
+    const previous = store.read();
+    const next = updateSettings(previous, patch);
+    if (backgroundFeaturesEnabled) trayController.setEnabled(next.settings.closeToTray);
+    try { return withMediaUrls(store.write(next)); }
+    catch (error) {
+      if (backgroundFeaturesEnabled) trayController.setEnabled(previous.settings.closeToTray);
+      throw error;
+    }
   });
 
   ipcMain.handle("phrase:add", (_event, payload) => {
@@ -338,13 +388,15 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("tts:synthesize", async (_event, payload) => {
+  ipcMain.handle("tts:synthesize", async (event, payload) => {
+    if (event.sender !== mainWindow.webContents) throw new Error("Invalid playback sender.");
     const state = store.read();
     const settings = updateSettings(state, payload.settings || {}).settings;
     const result = await synthesizeTts({
       text: payload.text,
       settings,
-      outputDir: dataPaths().tts
+      outputDir: dataPaths().tts,
+      azure: settings.ttsEngine === "azure" ? azureCredentials.read() : undefined
     });
 
     cleanupGeneratedVoiceFiles().catch(() => {});
@@ -400,6 +452,16 @@ function registerIpc() {
     return dataPaths().root;
   });
 
+  const azureHandle = (channel, handler) => ipcMain.handle(channel, (event, payload) => {
+    if (event.sender !== mainWindow.webContents) throw new Error("Invalid Azure settings sender.");
+    return handler(payload);
+  });
+  azureHandle("azure:get-settings", () => azureCredentials.status());
+  azureHandle("azure:save-settings", (payload) => azureCredentials.save(payload));
+  azureHandle("azure:delete-settings", () => azureCredentials.clear());
+  azureHandle("azure:test", (payload) => checkAzureConnection({ credentials: azureCredentials.resolve(payload) }));
+  azureHandle("app:open-azure-portal", () => shell.openExternal("https://portal.azure.com/"));
+
   ipcMain.handle("app:open-vb-cable-download", async () => {
     await shell.openExternal("https://vb-audio.com/Cable/");
     return true;
@@ -407,18 +469,41 @@ function registerIpc() {
 }
 
 app.whenReady().then(() => {
+  if (!hasInstanceLock) return;
   const paths = dataPaths();
   store = new LibraryStore(paths.library);
+  azureCredentials = new AzureCredentialStore(path.join(paths.root, "azure-credentials.json"), safeStorage);
   store.write(store.read());
   startGeneratedVoiceCleanup();
   registerIpc();
   createWindow();
+  trayController = new TrayController({ app, Tray, Menu, nativeImage, window: mainWindow });
+  if (backgroundFeaturesEnabled) {
+    try { trayController.setEnabled(store.read().settings.closeToTray); }
+    catch (error) {
+      startupWarning = "알림 영역 아이콘을 만들지 못해 백그라운드 실행을 껐습니다.";
+      store.update((state) => updateSettings(state, { closeToTray: false }));
+      console.warn(error.message);
+    }
+  }
+  speechOverlay = new SpeechOverlay({
+    BrowserWindow, screen, mainWindow,
+    enabled: backgroundFeaturesEnabled
+  });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    trayController?.restore();
   });
+});
+
+app.on("before-quit", () => {
+  trayController?.beginQuit();
+  // The overlay normally prevents close; destroy it before app.quit starts closing windows.
+  speechOverlay?.dispose();
+});
+app.on("will-quit", () => {
+  speechOverlay?.dispose();
+  trayController?.dispose();
 });
 
 app.on("window-all-closed", () => {

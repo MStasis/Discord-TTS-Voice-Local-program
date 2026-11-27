@@ -6,7 +6,10 @@ const dom = {
   outputDeviceSelect: document.querySelector("#outputDeviceSelect"),
   masterVolumeInput: document.querySelector("#masterVolumeInput"),
   masterVolumeValue: document.querySelector("#masterVolumeValue"),
+  monitorVolumeInput: document.querySelector("#monitorVolumeInput"),
+  monitorVolumeValue: document.querySelector("#monitorVolumeValue"),
   monitorEnabledInput: document.querySelector("#monitorEnabledInput"),
+  closeToTrayInput: document.querySelector("#closeToTrayInput"),
   setupCableButton: document.querySelector("#setupCableButton"),
   releaseCableButton: document.querySelector("#releaseCableButton"),
   refreshDevicesButton: document.querySelector("#refreshDevicesButton"),
@@ -15,6 +18,16 @@ const dom = {
   speakButton: document.querySelector("#speakButton"),
   ttsText: document.querySelector("#ttsText"),
   engineSelect: document.querySelector("#engineSelect"),
+  azureSettingsButton: document.querySelector("#azureSettingsButton"),
+  azureSettingsModal: document.querySelector("#azureSettingsModal"),
+  closeAzureSettingsButton: document.querySelector("#closeAzureSettingsButton"),
+  azureRegionInput: document.querySelector("#azureRegionInput"),
+  azureKeyInput: document.querySelector("#azureKeyInput"),
+  azureSettingsStatus: document.querySelector("#azureSettingsStatus"),
+  saveAzureSettingsButton: document.querySelector("#saveAzureSettingsButton"),
+  testAzureConnectionButton: document.querySelector("#testAzureConnectionButton"),
+  deleteAzureSettingsButton: document.querySelector("#deleteAzureSettingsButton"),
+  openAzurePortalButton: document.querySelector("#openAzurePortalButton"),
   voiceSelect: document.querySelector("#voiceSelect"),
   rateInput: document.querySelector("#rateInput"),
   pitchInput: document.querySelector("#pitchInput"),
@@ -31,6 +44,12 @@ const dom = {
   importSoundsButton: document.querySelector("#importSoundsButton"),
   soundGrid: document.querySelector("#soundGrid"),
   emptySounds: document.querySelector("#emptySounds"),
+  phraseCount: document.querySelector("#phraseCount"),
+  soundCount: document.querySelector("#soundCount"),
+  soundPagination: document.querySelector("#soundPagination"),
+  soundPageLabel: document.querySelector("#soundPageLabel"),
+  previousSoundsButton: document.querySelector("#previousSoundsButton"),
+  nextSoundsButton: document.querySelector("#nextSoundsButton"),
   soundEditModal: document.querySelector("#soundEditModal"),
   soundEditTitle: document.querySelector("#soundEditTitle"),
   soundEditStartInput: document.querySelector("#soundEditStartInput"),
@@ -46,13 +65,15 @@ const dom = {
 let state = {
   settings: {
     outputDeviceId: "",
-    ttsEngine: "edge",
+    ttsEngine: "azure",
     voice: "ko-KR-SunHiNeural",
     rate: 0,
     pitch: 0,
     ttsVolume: 0,
     masterVolume: 0.95,
-    monitorEnabled: true
+    monitorVolume: 1,
+    monitorEnabled: true,
+    closeToTray: false
   },
   phrases: [],
   recentPhrases: [],
@@ -61,11 +82,18 @@ let state = {
 
 const activePlayers = new Set();
 let cableInstallModalDismissed = false;
-let isSpeaking = false;
+let speechChain = Promise.resolve();
+let speechGeneration = 0;
 let editingSoundId = "";
+let soundPage = 0;
+let azureStatus = { configured: false, region: "" };
+let azureBusy = false;
+let azureOpener;
+const compactSounds = window.matchMedia?.("(max-width: 650px)");
 
 function setStatus(text, tone = "ready") {
   dom.statusText.textContent = text;
+  dom.statusText.title = text;
   dom.statusDot.classList.toggle("busy", tone === "busy");
   dom.statusDot.classList.toggle("error", tone === "error");
 }
@@ -83,8 +111,19 @@ function updateControlValues() {
   dom.outputDeviceSelect.value = state.settings.outputDeviceId || "";
   dom.masterVolumeInput.value = state.settings.masterVolume;
   dom.masterVolumeValue.textContent = percent(state.settings.masterVolume);
+  dom.monitorVolumeInput.value = state.settings.monitorVolume;
+  dom.monitorVolumeValue.textContent = percent(state.settings.monitorVolume);
+  dom.monitorVolumeInput.disabled = !state.settings.monitorEnabled;
   dom.monitorEnabledInput.checked = state.settings.monitorEnabled;
+  dom.closeToTrayInput.checked = state.settings.closeToTray;
   dom.engineSelect.value = state.settings.ttsEngine;
+  dom.azureSettingsButton.hidden = state.settings.ttsEngine !== "azure";
+  for (const option of dom.voiceSelect.options) {
+    if (option.hasAttribute?.("data-azure-only")) {
+      option.hidden = state.settings.ttsEngine !== "azure";
+      option.disabled = option.hidden;
+    }
+  }
   dom.voiceSelect.value = state.settings.voice;
   dom.voiceSelect.disabled = state.settings.ttsEngine === "windows";
   dom.rateInput.value = state.settings.rate;
@@ -100,12 +139,74 @@ async function saveSettings(patch) {
   updateControlValues();
 }
 
+function azureFailureMessage(error) {
+  const message = typeof error === "string" ? error : String(error?.message || "");
+  return message.match(/AZURE_[A-Z_]+: ([^\n]*)/)?.[1] || "Azure 설정을 처리하지 못했습니다.";
+}
+
+function renderAzureStatus(message, failed = false) {
+  dom.azureSettingsStatus.textContent = message || (azureStatus.configured ? "키 저장됨" : "키 미등록");
+  dom.azureSettingsStatus.classList.toggle("error", failed);
+  dom.azureKeyInput.placeholder = azureStatus.configured ? "저장된 키 유지" : "Azure Speech 키";
+  dom.deleteAzureSettingsButton.disabled = azureBusy || !azureStatus.configured;
+}
+
+async function openAzureSettings() {
+  azureOpener = document.activeElement;
+  dom.azureKeyInput.value = "";
+  dom.azureSettingsModal.hidden = false;
+  renderAzureStatus("불러오는 중");
+  try {
+    azureStatus = await VOICEBOARD.getAzureSettings();
+    if (dom.azureSettingsModal.hidden) return;
+    dom.azureRegionInput.value = azureStatus.region || "koreacentral";
+    renderAzureStatus(azureStatus.message ? azureFailureMessage(azureStatus.message) : "", Boolean(azureStatus.message));
+    dom.azureRegionInput.focus({ preventScroll: true });
+  } catch (error) {
+    renderAzureStatus(azureFailureMessage(error), true);
+  }
+}
+
+function closeAzureSettings() {
+  dom.azureSettingsModal.hidden = true;
+  dom.azureKeyInput.value = "";
+  azureOpener?.focus({ preventScroll: true });
+}
+
+async function updateAzureConnection(action) {
+  if (azureBusy) return;
+  azureBusy = true;
+  const payload = { region: dom.azureRegionInput.value.trim(), key: dom.azureKeyInput.value.trim() };
+  const controls = [dom.saveAzureSettingsButton, dom.testAzureConnectionButton, dom.deleteAzureSettingsButton, dom.azureRegionInput, dom.azureKeyInput];
+  controls.forEach((control) => { control.disabled = true; });
+  renderAzureStatus(action === "test" ? "연결 확인 중" : "처리 중");
+  try {
+    if (action === "test") {
+      const result = await VOICEBOARD.testAzureConnection(payload);
+      renderAzureStatus(`연결 확인됨 · 한국어 목소리 ${result.koreanVoices}개`);
+    } else {
+      azureStatus = action === "save"
+        ? await VOICEBOARD.saveAzureSettings(payload) : await VOICEBOARD.deleteAzureSettings();
+      dom.azureKeyInput.value = "";
+      renderAzureStatus();
+      setStatus(action === "save" ? "Azure 연결 설정 저장됨" : "Azure 키 삭제됨");
+    }
+  } catch (error) {
+    renderAzureStatus(azureFailureMessage(error), true);
+  } finally {
+    azureBusy = false;
+    controls.forEach((control) => { control.disabled = false; });
+    dom.deleteAzureSettingsButton.disabled = !azureStatus.configured;
+  }
+}
+
 function createButton(className, icon, label, title) {
   const button = document.createElement("button");
   button.className = className;
   button.type = "button";
   button.title = title || label;
-  button.innerHTML = `<i data-lucide="${icon}"></i><span>${label}</span>`;
+  button.innerHTML = `<i data-lucide="${icon}"></i><span></span>`;
+  button.querySelector("span").textContent = label;
   return button;
 }
 
@@ -243,41 +344,59 @@ function trackAudio(audio, role, kind) {
   const entry = { audio, role, kind };
   activePlayers.add(entry);
 
-  const cleanup = () => activePlayers.delete(entry);
-  audio.addEventListener("ended", cleanup, { once: true });
+  entry.finished = new Promise((resolve) => {
+    entry.finish = (ok = true) => { activePlayers.delete(entry); resolve(ok); };
+  });
+  audio.addEventListener("ended", () => entry.finish(), { once: true });
   audio.addEventListener("error", () => {
-    cleanup();
+    entry.finish(false);
     setStatus("재생 실패", "error");
   });
 
   return entry;
 }
 
-function updateLiveSendVolume() {
+function updateLiveOutputVolumes() {
   activePlayers.forEach((entry) => {
-    if (entry.role === "send") {
-      entry.audio.volume = state.settings.masterVolume;
-    }
+    entry.audio.volume = entry.role === "send"
+      ? state.settings.masterVolume
+      : state.settings.monitorEnabled ? state.settings.monitorVolume : 0;
   });
+}
+
+async function savePlaybackSettings(patch) {
+  try {
+    await saveSettings(patch);
+    updateLiveOutputVolumes();
+  } catch {
+    updateControlValues();
+    setStatus("출력 설정 저장 실패", "error");
+  }
 }
 
 async function playUrl(fileUrl, options = {}) {
   const { kind = "sound" } = options;
   const sendAudio = new Audio(fileUrl);
   sendAudio.volume = state.settings.masterVolume;
-  trackAudio(sendAudio, "send", kind);
-  await applySink(sendAudio, state.settings.outputDeviceId);
+  const entries = [trackAudio(sendAudio, "send", kind)];
+  try {
+    await applySink(sendAudio, state.settings.outputDeviceId);
 
-  const players = [sendAudio];
-  if (state.settings.monitorEnabled && state.settings.outputDeviceId) {
-    const monitorAudio = new Audio(fileUrl);
-    monitorAudio.volume = 1;
-    trackAudio(monitorAudio, "monitor", kind);
-    players.push(monitorAudio);
+    const players = [sendAudio];
+    if (state.settings.monitorEnabled && state.settings.outputDeviceId) {
+      const monitorAudio = new Audio(fileUrl);
+      monitorAudio.volume = state.settings.monitorVolume;
+      entries.push(trackAudio(monitorAudio, "monitor", kind));
+      players.push(monitorAudio);
+    }
+
+    await Promise.all(players.map((audio) => audio.play()));
+    setStatus("재생 중", "busy");
+    return { finished: Promise.all(entries.map((entry) => entry.finished)) };
+  } catch (error) {
+    entries.forEach((entry) => { entry.audio.pause(); entry.finish(false); });
+    throw error;
   }
-
-  await Promise.all(players.map((audio) => audio.play()));
-  setStatus("재생 중", "busy");
 }
 
 function stopMatchingPlayers(predicate, successText, emptyText) {
@@ -289,13 +408,14 @@ function stopMatchingPlayers(predicate, successText, emptyText) {
 
     entry.audio.pause();
     entry.audio.currentTime = 0;
-    activePlayers.delete(entry);
+    entry.finish(false);
     stopped += 1;
   });
   setStatus(stopped ? successText : emptyText);
 }
 
 function stopAll() {
+  speechGeneration += 1;
   stopMatchingPlayers(() => true, "정지됨", "정지할 재생 없음");
 }
 
@@ -359,18 +479,13 @@ async function releaseCableRouting() {
   }
 }
 
-async function speakText(text, options = {}) {
+function speakText(text, options = {}) {
   const { clearComposer = false } = options;
   const normalized = text.trim();
   if (!normalized) {
     setStatus("문장을 입력하세요", "error");
     dom.ttsText.focus();
-    return;
-  }
-
-  if (isSpeaking) {
-    setStatus("이전 음성 생성 중 · 입력한 문장은 유지됩니다", "busy");
-    return;
+    return Promise.resolve({ ok: false });
   }
 
   const submittedDraft = clearComposer ? dom.ttsText.value : "";
@@ -379,41 +494,44 @@ async function speakText(text, options = {}) {
     dom.ttsText.focus();
   }
 
-  try {
-    isSpeaking = true;
-    setStatus("TTS 생성 중", "busy");
-    dom.speakButton.disabled = true;
-    const result = await VOICEBOARD.synthesizeTts({
-      text: normalized,
-      settings: state.settings
-    });
-    await playUrl(result.fileUrl, { kind: "tts" });
-
+  const generation = speechGeneration;
+  const settings = { ...state.settings };
+  const job = speechChain.then(async () => {
     try {
-      state.recentPhrases = await VOICEBOARD.addRecentPhrase(normalized);
-      renderPhrases();
-      refreshIcons();
+      if (generation !== speechGeneration) return { ok: false };
+      setStatus("TTS 생성 중", "busy");
+      const result = await VOICEBOARD.synthesizeTts({ text: normalized, settings });
+      if (generation !== speechGeneration) return { ok: false };
+      const playback = await playUrl(result.fileUrl, { kind: "tts" });
+
+      try {
+        state.recentPhrases = await VOICEBOARD.addRecentPhrase(normalized);
+        renderPhrases();
+        refreshIcons();
+      } catch (error) {
+        console.error(error);
+        setStatus("음성 재생됨 · 최근 대화 저장 실패", "error");
+      }
+
+      const results = await playback.finished;
+      return { ok: results.every(Boolean) };
     } catch (error) {
       console.error(error);
-      setStatus("음성 재생됨 · 최근 대화 저장 실패", "error");
+      if (clearComposer) {
+        // Preserve new typing while restoring a failed submission.
+        dom.ttsText.value = dom.ttsText.value ? `${submittedDraft}\n${dom.ttsText.value}` : submittedDraft;
+      }
+      const unavailable = String(error?.message).includes("TTS_VOICE_UNAVAILABLE");
+      const forbidden = unavailable && String(error.message).includes("HTTP 403");
+      const message = String(error?.message).includes("AZURE_") ? azureFailureMessage(error) : forbidden
+        ? "온라인 목소리 연결 거부 (403) · 자동 전환 안 함"
+        : unavailable ? "온라인 목소리 연결 실패 · 자동 전환 안 함" : "TTS 생성 실패 · 다시 전송해 주세요";
+      setStatus(message, "error");
+      return { ok: false, message };
     }
-
-    if (result.engine === "windows-fallback") {
-      setStatus("Windows 음성으로 재생 중", "busy");
-    }
-  } catch (error) {
-    console.error(error);
-    if (clearComposer) {
-      // Keep both the failed submission and any draft typed while synthesis was pending.
-      dom.ttsText.value = dom.ttsText.value
-        ? `${submittedDraft}\n${dom.ttsText.value}`
-        : submittedDraft;
-    }
-    setStatus("TTS 생성 실패", "error");
-  } finally {
-    isSpeaking = false;
-    dom.speakButton.disabled = false;
-  }
+  });
+  speechChain = job.catch(() => {});
+  return job;
 }
 
 function speakFromComposer() {
@@ -512,21 +630,14 @@ async function saveSoundEdit() {
 
 function renderPhrases() {
   dom.phraseGrid.innerHTML = "";
+  dom.phraseCount.textContent = String(state.recentPhrases.length);
   dom.emptyPhrases.hidden = state.recentPhrases.length > 0;
 
   state.recentPhrases.forEach((phrase) => {
     const item = document.createElement("article");
-    item.className = "library-item";
-    item.innerHTML = `
-      <strong></strong>
-      <p></p>
-      <div class="item-actions"></div>
-    `;
-    item.querySelector("strong").textContent = phrase.label;
-    item.querySelector("p").textContent = phrase.text;
-
-    const actions = item.querySelector(".item-actions");
-    const playButton = createButton("secondary-button", "play", "다시 전송", "다시 전송");
+    item.className = "recent-item";
+    const playButton = createButton("recent-play", "rotate-ccw", phrase.text, phrase.text);
+    playButton.setAttribute("aria-label", `다시 전송: ${phrase.text}`);
     const deleteButton = createIconButton("trash-2", "최근 대화 삭제", true);
 
     playButton.addEventListener("click", () => speakText(phrase.text));
@@ -537,34 +648,35 @@ function renderPhrases() {
       setStatus("최근 대화 삭제됨");
     });
 
-    actions.append(playButton, deleteButton);
+    item.append(playButton, deleteButton);
     dom.phraseGrid.append(item);
   });
 }
 
 function renderSounds() {
   dom.soundGrid.innerHTML = "";
+  dom.soundCount.textContent = String(state.sounds.length);
   dom.emptySounds.hidden = state.sounds.length > 0;
+  dom.soundGrid.hidden = state.sounds.length === 0;
+  const pageSize = compactSounds?.matches ? 3 : 6;
+  const pageCount = Math.max(1, Math.ceil(state.sounds.length / pageSize));
+  soundPage = Math.min(Math.max(soundPage, 0), pageCount - 1);
+  dom.soundPagination.hidden = pageCount === 1;
+  dom.previousSoundsButton.disabled = soundPage === 0;
+  dom.nextSoundsButton.disabled = soundPage === pageCount - 1;
+  dom.soundPageLabel.textContent = `${soundPage + 1} / ${pageCount}`;
 
-  state.sounds.forEach((sound) => {
+  state.sounds.slice(soundPage * pageSize, (soundPage + 1) * pageSize).forEach((sound) => {
     const item = document.createElement("article");
-    item.className = "library-item";
-    item.innerHTML = `
-      <strong></strong>
-      <p></p>
-      <div class="item-actions"></div>
-    `;
-    item.querySelector("strong").textContent = sound.label;
-    item.querySelector("p").textContent = sound.exists ? "Ready" : "파일 없음";
-
-    const actions = item.querySelector(".item-actions");
-    const playButton = createButton("secondary-button", "play", "실행", "사운드 실행");
-    const editButton = createButton("secondary-button", "scissors", "편집", "사운드 편집");
+    item.className = "sound-item";
+    const playButton = createButton("sound-play", "play", sound.label, sound.exists ? sound.label : `${sound.label} · 파일 없음`);
+    playButton.setAttribute("aria-label", `재생: ${sound.label}`);
+    const editButton = createIconButton("scissors", "사운드 편집");
     const deleteButton = createIconButton("trash-2", "사운드 삭제", true);
 
     playButton.disabled = !sound.exists;
     editButton.disabled = !sound.exists;
-    playButton.addEventListener("click", () => playUrl(sound.fileUrl));
+    playButton.addEventListener("click", () => playUrl(sound.fileUrl).catch(() => setStatus("사운드 재생 실패", "error")));
     editButton.addEventListener("click", () => openSoundEditor(sound));
     deleteButton.addEventListener("click", async () => {
       state = await VOICEBOARD.deleteSound(sound.id);
@@ -572,7 +684,7 @@ function renderSounds() {
       setStatus("사운드 삭제됨");
     });
 
-    actions.append(playButton, editButton, deleteButton);
+    item.append(playButton, editButton, deleteButton);
     dom.soundGrid.append(item);
   });
 }
@@ -585,6 +697,25 @@ function render() {
 }
 
 function bindEvents() {
+  dom.azureSettingsButton.addEventListener("click", openAzureSettings);
+  dom.closeAzureSettingsButton.addEventListener("click", closeAzureSettings);
+  dom.saveAzureSettingsButton.addEventListener("click", () => updateAzureConnection("save"));
+  dom.testAzureConnectionButton.addEventListener("click", () => updateAzureConnection("test"));
+  dom.deleteAzureSettingsButton.addEventListener("click", () => updateAzureConnection("delete"));
+  dom.openAzurePortalButton.addEventListener("click", () => VOICEBOARD.openAzurePortal().catch(() => renderAzureStatus("Azure 포털을 열지 못했습니다.", true)));
+  dom.azureSettingsModal.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeAzureSettings(); }
+    if (event.key === "Tab") {
+      const controls = [...dom.azureSettingsModal.querySelectorAll("input:not(:disabled), button:not(:disabled)")];
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+  });
+  dom.previousSoundsButton.addEventListener("click", () => { soundPage--; renderSounds(); refreshIcons(); });
+  dom.nextSoundsButton.addEventListener("click", () => { soundPage++; renderSounds(); refreshIcons(); });
+  compactSounds?.addEventListener("change", () => { soundPage = 0; renderSounds(); refreshIcons(); });
   dom.refreshDevicesButton.addEventListener("click", refreshDevices);
   dom.openDataButton.addEventListener("click", () => VOICEBOARD.openDataFolder());
   dom.stopAllButton.addEventListener("click", stopAll);
@@ -630,6 +761,7 @@ function bindEvents() {
   });
   dom.soundEditModal.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      event.stopPropagation();
       closeSoundEditor();
     }
   });
@@ -637,14 +769,31 @@ function bindEvents() {
   dom.outputDeviceSelect.addEventListener("change", () =>
     saveSettings({ outputDeviceId: dom.outputDeviceSelect.value })
   );
-  dom.masterVolumeInput.addEventListener("input", async () => {
-    await saveSettings({ masterVolume: Number(dom.masterVolumeInput.value) });
-    updateLiveSendVolume();
-  });
-  dom.monitorEnabledInput.addEventListener("change", () =>
-    saveSettings({ monitorEnabled: dom.monitorEnabledInput.checked })
+  dom.masterVolumeInput.addEventListener("input", () =>
+    savePlaybackSettings({ masterVolume: Number(dom.masterVolumeInput.value) })
   );
-  dom.engineSelect.addEventListener("change", () => saveSettings({ ttsEngine: dom.engineSelect.value }));
+  dom.monitorVolumeInput.addEventListener("input", () =>
+    savePlaybackSettings({ monitorVolume: Number(dom.monitorVolumeInput.value) })
+  );
+  dom.monitorEnabledInput.addEventListener("change", () =>
+    savePlaybackSettings({ monitorEnabled: dom.monitorEnabledInput.checked })
+  );
+  dom.closeToTrayInput.addEventListener("change", async () => {
+    dom.closeToTrayInput.disabled = true;
+    try {
+      await saveSettings({ closeToTray: dom.closeToTrayInput.checked });
+      setStatus(state.settings.closeToTray ? "백그라운드 실행 켜짐" : "백그라운드 실행 꺼짐");
+    } catch (error) {
+      updateControlValues();
+      setStatus("백그라운드 실행 설정 실패", "error");
+    } finally { dom.closeToTrayInput.disabled = false; }
+  });
+  dom.engineSelect.addEventListener("change", async () => {
+    const ttsEngine = dom.engineSelect.value;
+    const azureOnly = /^ko-KR-(JiMin|SeoHyeon|SoonBok|YuJin)Neural$/.test(state.settings.voice);
+    try { await saveSettings({ ttsEngine, voice: ttsEngine !== "azure" && azureOnly ? "ko-KR-SunHiNeural" : state.settings.voice }); }
+    catch { updateControlValues(); setStatus("엔진 설정 저장 실패", "error"); }
+  });
   dom.voiceSelect.addEventListener("change", () => saveSettings({ voice: dom.voiceSelect.value }));
   dom.rateInput.addEventListener("input", () => saveSettings({ rate: Number(dom.rateInput.value) }));
   dom.pitchInput.addEventListener("input", () =>
@@ -665,7 +814,24 @@ async function init() {
   bindEvents();
   state = await VOICEBOARD.getLibrary();
   render();
+  VOICEBOARD.onShortcutStatus?.(({ registered }) => {
+    if (!registered) setStatus("Space+Enter를 사용할 수 없습니다 · 앱을 다시 실행해 주세요", "error");
+  });
+  VOICEBOARD.onOverlaySpeak?.(async ({ id, text }) => {
+    try {
+      const result = await speakText(text);
+      VOICEBOARD.overlayResult({ id, ok: Boolean(result?.ok), message: result?.message });
+    } catch {
+      VOICEBOARD.overlayResult({ id, ok: false });
+    }
+  });
+  const overlayStatus = await VOICEBOARD.overlayReady?.();
   await checkCableInstallation();
+  if (overlayStatus?.startupWarning) {
+    setStatus(overlayStatus.startupWarning, "error");
+  } else if (overlayStatus && !overlayStatus.registered) {
+    setStatus("Space+Enter를 사용할 수 없습니다 · 앱을 다시 실행해 주세요", "error");
+  }
 }
 
 init().catch((error) => {

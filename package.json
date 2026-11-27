@@ -1,6 +1,6 @@
 {
   "name": "discord-local-voiceboard",
-  "version": "0.1.1",
+  "version": "0.1.8",
   "description": "Local Discord TTS and soundboard app that plays into a virtual audio device without a bot.",
   "main": "src/main/main.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "dist": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
     "pack": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --publish never",
     "test": "node --test",
-    "lint": "node --check src/main/main.js && node --check src/main/windowsAudio.js && node --check src/main/discordVoice.js && node --check src/main/tts.js && node --check src/main/youtube.js && node --check src/preload.cjs && node --check src/renderer/app.js && node --check src/shared/library.cjs"
+    "lint": "node --check src/main/main.js && node --check src/main/azureTts.js && node --check src/main/azureCredentials.js && node --check src/main/overlay.js && node --check src/main/hotkey.js && node --check src/main/tray.js && node --check src/main/windowsAudio.js && node --check src/main/discordVoice.js && node --check src/main/tts.js && node --check src/main/youtube.js && node --check src/preload.cjs && node --check src/overlay-preload.cjs && node --check src/renderer/app.js && node --check src/renderer/panels.js && node --check src/renderer/overlay.js && node --check src/shared/library.cjs && node --check scripts/verify-main-ui.cjs && node --check scripts/verify-tray-ui.cjs && node --check scripts/create-tray-icon.cjs",
+    "test:overlay-ui": "electron scripts/verify-overlay.cjs",
+    "test:main-ui": "electron scripts/verify-main-ui.cjs",
+    "test:tray-ui": "electron scripts/verify-tray-ui.cjs"
   },
   "keywords": [
     "discord",
@@ -42,6 +45,12 @@
       "node_modules/ffmpeg-static/**/*",
       "node_modules/lucide/**/*",
       "node_modules/ws/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "Azure설정방법.txt",
+        "to": "Azure설정방법.txt"
+      }
     ],
     "asarUnpack": [
       "node_modules/ffmpeg-static/ffmpeg.exe"

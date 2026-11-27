@@ -46,7 +46,7 @@ test("normalizes damaged state into a usable library", () => {
   assert.equal(state.settings.masterVolume, 1);
   assert.equal(state.settings.rate, -100);
   assert.equal(state.settings.pitch, 0);
-  assert.equal(state.settings.ttsEngine, "edge");
+  assert.equal(state.settings.ttsEngine, "azure");
   assert.equal(state.settings.monitorEnabled, false);
   assert.deepEqual(state.settings.captureDefaultsBackup, {
     console: "console-id",
@@ -245,3 +245,15 @@ async function exists(filePath) {
     return false;
   }
 }
+test("feedback volume defaults to the previous 100% without changing saved send volume", () => {
+  const previous = normalizeState({ settings: { masterVolume: 0.42, monitorEnabled: true, ttsEngine: "azure" } });
+  assert.equal(previous.settings.masterVolume, 0.42);
+  assert.equal(previous.settings.monitorVolume, 1);
+  assert.equal(previous.settings.ttsEngine, "azure");
+  for (const [value, expected] of [[-1, 0], [4, 1], ["bad", 1], [0, 0], [0.37, 0.37]]) {
+    const state = normalizeState({ settings: { masterVolume: 0.42, monitorVolume: value } });
+    assert.equal(state.settings.masterVolume, 0.42);
+    assert.equal(state.settings.monitorVolume, expected);
+    assert.equal(normalizeState(JSON.parse(JSON.stringify(state))).settings.monitorVolume, expected);
+  }
+});

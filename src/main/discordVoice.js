@@ -18,7 +18,9 @@ async function applyDiscordVoiceProfile(mode) {
   if (applying) return { applied: false, message: "Discord 설정 변경이 이미 진행 중입니다" };
   applying = true;
   try {
-    const script = await fs.readFile(path.join(__dirname, "discordVoice.ps1"), "utf8");
+    const script = (await Promise.all(["discordWait.ps1", "discordVoice.ps1"].map((file) =>
+      fs.readFile(path.join(__dirname, file), "utf8")
+    ))).join("\n");
     const { stdout } = await execFileAsync("powershell.exe", [
       "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
       "-Command", "& ([scriptblock]::Create($env:VOICEBOARD_DISCORD_SCRIPT))"
@@ -28,7 +30,7 @@ async function applyDiscordVoiceProfile(mode) {
         VOICEBOARD_DISCORD_SCRIPT: script,
         VOICEBOARD_DISCORD_PROFILE: JSON.stringify(PROFILES[mode])
       },
-      encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024, windowsHide: true
+      encoding: "utf8", timeout: 105000, maxBuffer: 1024 * 1024, windowsHide: true
     });
     const result = JSON.parse(stdout.trim());
     return result;

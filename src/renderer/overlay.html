@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Voiceboard - 음성 입력</title>
+    <link rel="stylesheet" href="./overlay.css" />
+  </head>
+  <body>
+    <header>
+      <span class="title"><img class="app-icon" src="../assets/app-icon.png" width="20" height="20" alt="" />음성 입력</span>
+      <button id="closeButton" type="button" title="닫기" aria-label="닫기"><i data-lucide="x"></i></button>
+    </header>
+    <form id="speechForm">
+      <textarea id="overlayText" rows="2" maxlength="4000" aria-label="전송할 문장" placeholder="할 말을 입력하세요" spellcheck="false"></textarea>
+      <button id="sendButton" type="submit" title="전송" aria-label="전송"><i data-lucide="arrow-up"></i></button>
+    </form>
+    <p id="overlayStatus" role="status" aria-live="polite"></p>
+    <script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
+    <script src="./overlay.js"></script>
+  </body>
+</html>

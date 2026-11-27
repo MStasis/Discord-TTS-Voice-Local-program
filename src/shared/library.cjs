@@ -2,13 +2,15 @@ const path = require("node:path");
 
 const DEFAULT_SETTINGS = Object.freeze({
   outputDeviceId: "",
-  ttsEngine: "edge",
+  ttsEngine: "azure",
   voice: "ko-KR-SunHiNeural",
   rate: 0,
   pitch: 0,
   ttsVolume: 0,
   masterVolume: 0.95,
+  monitorVolume: 1,
   monitorEnabled: true,
+  closeToTray: false,
   captureDefaultsBackup: {
     console: "",
     multimedia: "",
@@ -66,16 +68,19 @@ function normalizeSettings(settings = {}) {
 
   return {
     outputDeviceId: normalizeText(settings.outputDeviceId),
-    ttsEngine: normalizeText(settings.ttsEngine) === "windows" ? "windows" : "edge",
+    ttsEngine: ["azure", "edge", "windows"].includes(normalizeText(settings.ttsEngine))
+      ? normalizeText(settings.ttsEngine) : DEFAULT_SETTINGS.ttsEngine,
     voice: normalizeText(settings.voice) || DEFAULT_SETTINGS.voice,
     rate: clampNumber(settings.rate, -100, 100, DEFAULT_SETTINGS.rate),
     pitch: clampNumber(settings.pitch, -200, 200, DEFAULT_SETTINGS.pitch),
     ttsVolume: clampNumber(settings.ttsVolume, -100, 100, DEFAULT_SETTINGS.ttsVolume),
     masterVolume: clampNumber(settings.masterVolume, 0, 1, DEFAULT_SETTINGS.masterVolume),
+    monitorVolume: clampNumber(settings.monitorVolume, 0, 1, DEFAULT_SETTINGS.monitorVolume),
     monitorEnabled:
       typeof settings.monitorEnabled === "boolean"
         ? settings.monitorEnabled
         : DEFAULT_SETTINGS.monitorEnabled,
+    closeToTray: typeof settings.closeToTray === "boolean" ? settings.closeToTray : DEFAULT_SETTINGS.closeToTray,
     captureDefaultsBackup: {
       console: normalizeText(backup.console),
       multimedia: normalizeText(backup.multimedia),

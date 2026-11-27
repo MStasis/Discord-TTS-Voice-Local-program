@@ -1,8 +1,17 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("voiceboard", {
+  onShortcutStatus: (callback) => ipcRenderer.on("overlay:shortcut-status", (_event, status) => callback(status)),
+  onOverlaySpeak: (callback) => ipcRenderer.on("overlay:speak", (_event, request) => callback(request)),
+  overlayReady: () => ipcRenderer.invoke("overlay:renderer-ready"),
+  overlayResult: (result) => ipcRenderer.send("overlay:result", result),
   getLibrary: () => ipcRenderer.invoke("library:get"),
   updateSettings: (patch) => ipcRenderer.invoke("settings:update", patch),
+  getAzureSettings: () => ipcRenderer.invoke("azure:get-settings"),
+  saveAzureSettings: (payload) => ipcRenderer.invoke("azure:save-settings", payload),
+  deleteAzureSettings: () => ipcRenderer.invoke("azure:delete-settings"),
+  testAzureConnection: (payload) => ipcRenderer.invoke("azure:test", payload),
+  openAzurePortal: () => ipcRenderer.invoke("app:open-azure-portal"),
   addPhrase: (payload) => ipcRenderer.invoke("phrase:add", payload),
   deletePhrase: (id) => ipcRenderer.invoke("phrase:delete", id),
   addRecentPhrase: (text) => ipcRenderer.invoke("recent:add", text),

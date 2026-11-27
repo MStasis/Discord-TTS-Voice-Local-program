@@ -9,248 +9,167 @@
   <body>
     <div class="app-shell">
       <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">V</div>
-          <div>
-            <h1>Voiceboard</h1>
-            <span>Local Discord audio</span>
-          </div>
-        </div>
-
-        <div class="status-card">
-          <div class="status-row">
-            <span class="status-dot" id="statusDot"></span>
-            <span id="statusText">준비됨</span>
-          </div>
-          <button class="ghost-button" id="stopAllButton" type="button">
-            <i data-lucide="square"></i>
-            <span>정지</span>
+        <div class="brand"><i data-lucide="audio-lines"></i><h1>Voiceboard</h1></div>
+        <nav class="nav-list" aria-label="메뉴">
+          <button type="button" id="composeNav" class="nav-item active" aria-current="page" title="말하기">
+            <i data-lucide="message-circle"></i><span>말하기</span>
+          </button>
+          <button type="button" id="phrasesNav" class="nav-item" data-panel="phrases" aria-controls="phrases-panel" aria-expanded="false" title="최근 대화">
+            <i data-lucide="history"></i><span>최근 대화</span><small id="phraseCount">0</small>
+          </button>
+          <button type="button" id="soundsNav" class="nav-item" data-panel="sounds" aria-controls="sounds-panel" aria-expanded="false" title="사운드">
+            <i data-lucide="music-2"></i><span>사운드</span><small id="soundCount">0</small>
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button type="button" id="settingsNav" class="nav-item" data-panel="settings" aria-controls="settings-panel" aria-expanded="false" title="설정">
+            <i data-lucide="sliders-horizontal"></i><span>설정</span>
           </button>
         </div>
-
-        <nav class="nav-list" aria-label="Sections">
-          <a href="#tts-panel" class="nav-item active">
-            <i data-lucide="message-circle"></i>
-            <span>TTS</span>
-          </a>
-          <a href="#phrases-panel" class="nav-item">
-            <i data-lucide="history"></i>
-            <span>최근 대화</span>
-          </a>
-          <a href="#sounds-panel" class="nav-item">
-            <i data-lucide="music-2"></i>
-            <span>사운드</span>
-          </a>
-          <a href="#settings-panel" class="nav-item">
-            <i data-lucide="sliders-horizontal"></i>
-            <span>설정</span>
-          </a>
-        </nav>
       </aside>
 
       <main class="workspace">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">봇 없이 내 PC에서 Discord 음성으로</p>
-            <h2>TTS와 사운드보드를 바로 실행</h2>
-          </div>
+          <h2>말하기</h2>
           <div class="top-actions">
-            <button class="primary-button" id="setupCableButton" type="button">
-              <i data-lucide="plug-zap"></i>
-              <span>세팅</span>
-            </button>
-            <button class="secondary-button" id="releaseCableButton" type="button">
-              <i data-lucide="plug"></i>
-              <span>해제</span>
-            </button>
-            <button class="secondary-button" id="refreshDevicesButton" type="button">
-              <i data-lucide="refresh-cw"></i>
-              <span>장치 새로고침</span>
-            </button>
-            <button class="secondary-button" id="openDataButton" type="button">
-              <i data-lucide="folder-open"></i>
-              <span>보관함</span>
-            </button>
+            <button class="secondary-button" id="setupCableButton" type="button"><i data-lucide="plug-zap"></i><span>세팅</span></button>
+            <button class="secondary-button" id="releaseCableButton" type="button"><i data-lucide="unplug"></i><span>해제</span></button>
           </div>
         </header>
 
-        <section class="device-strip" id="settings-panel">
-          <label class="field wide-field">
-            <span>출력 대상</span>
-            <select id="outputDeviceSelect"></select>
-          </label>
-          <label class="field">
-            <span>Discord 송출 볼륨 <b id="masterVolumeValue">95%</b></span>
-            <input id="masterVolumeInput" type="range" min="0" max="1" step="0.01" />
-          </label>
-          <label class="field toggle-field">
-            <span>내 듣기</span>
-            <span class="check-row">
-              <input id="monitorEnabledInput" type="checkbox" />
-              <b>송출과 분리</b>
-            </span>
-          </label>
-        </section>
-
-        <section class="composer" id="tts-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Neural voice</p>
-              <h3>말하기</h3>
-            </div>
-            <button class="primary-button" id="speakButton" type="button">
-              <i data-lucide="play"></i>
-              <span>실행</span>
-            </button>
-          </div>
-
-          <textarea id="ttsText" rows="5" placeholder="Discord 음성 채널에 보낼 문장을 입력하세요."></textarea>
-
-          <div class="control-grid">
-            <label class="field">
-              <span>엔진</span>
-              <select id="engineSelect">
-                <option value="edge">Neural Online</option>
-                <option value="windows">Windows Local</option>
-              </select>
+        <section class="composer" id="tts-panel" aria-label="음성 전송">
+          <label for="ttsText" class="sr-only">전송할 문장</label>
+          <textarea id="ttsText" maxlength="4000" placeholder="할 말을 입력하세요" spellcheck="false"></textarea>
+          <div class="composer-toolbar">
+            <label class="master-volume" title="Discord 송출 볼륨">
+              <i data-lucide="volume-2"></i><span class="volume-label">송출 볼륨</span>
+              <input id="masterVolumeInput" type="range" min="0" max="1" step="0.01" aria-label="Discord 송출 볼륨" />
+              <b id="masterVolumeValue">95%</b>
             </label>
-            <label class="field">
-              <span>목소리</span>
-              <select id="voiceSelect">
-                <option value="ko-KR-SunHiNeural">SunHi Korean Female</option>
-                <option value="en-US-JennyNeural">Jenny English Female</option>
-                <option value="en-US-AriaNeural">Aria English Female</option>
-                <option value="ja-JP-NanamiNeural">Nanami Japanese Female</option>
-                <option value="zh-CN-XiaoxiaoNeural">Xiaoxiao Chinese Female</option>
-              </select>
-            </label>
-            <label class="field">
-              <span>속도 <b id="rateValue">0%</b></span>
-              <input id="rateInput" type="range" min="-50" max="50" step="5" />
-            </label>
-            <label class="field">
-              <span>피치 <b id="pitchValue">0Hz</b></span>
-              <input id="pitchInput" type="range" min="-80" max="80" step="5" />
-            </label>
-            <label class="field">
-              <span>TTS 볼륨 <b id="ttsVolumeValue">0%</b></span>
-              <input id="ttsVolumeInput" type="range" min="-50" max="50" step="5" />
-            </label>
-          </div>
-
-        </section>
-
-        <section class="library-section" id="phrases-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Recent conversations</p>
-              <h3>최근 대화</h3>
+            <div class="composer-actions">
+              <button class="icon-button" id="stopAllButton" type="button" title="전체 정지" aria-label="전체 정지"><i data-lucide="square"></i></button>
+              <button class="icon-button send-button" id="speakButton" type="button" title="음성 전송" aria-label="음성 전송"><i data-lucide="arrow-up"></i></button>
             </div>
           </div>
-          <div class="item-grid" id="phraseGrid"></div>
-          <p class="empty-state" id="emptyPhrases">최근 대화가 없습니다.</p>
         </section>
 
-        <section class="library-section" id="sounds-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Soundboard</p>
-              <h3>사운드보드</h3>
-            </div>
-            <div class="section-actions">
-              <button class="secondary-button" id="stopSoundsButton" type="button">
-                <i data-lucide="square"></i>
-                <span>사운드 정지</span>
+        <section class="drawer" id="drawer" aria-labelledby="drawerTitle" inert>
+          <div class="drawer-clip">
+            <div class="drawer-inner">
+              <button class="drawer-heading" id="closeDrawerButton" type="button" title="패널 닫기" aria-label="패널 닫기">
+                <span class="drawer-handle" aria-hidden="true"></span>
+                <span id="drawerTitle">최근 대화</span><i data-lucide="chevron-down"></i>
               </button>
-              <button class="primary-button" id="importSoundsButton" type="button">
-                <i data-lucide="file-plus-2"></i>
-                <span>사운드 추가</span>
-              </button>
+              <div class="drawer-content">
+                <section id="phrases-panel" class="drawer-panel" aria-label="최근 대화" hidden>
+                  <div class="recent-list" id="phraseGrid"></div>
+                  <p class="empty-state" id="emptyPhrases"><i data-lucide="message-circle"></i><span>최근 대화가 없습니다</span></p>
+                </section>
+
+                <section id="sounds-panel" class="drawer-panel sound-panel" aria-label="사운드보드" hidden>
+                  <div class="sound-toolbar">
+                    <div class="youtube-row">
+                      <i data-lucide="link" aria-hidden="true"></i>
+                      <input id="youtubeUrlInput" type="url" placeholder="YouTube 링크" aria-label="YouTube 링크" />
+                      <button class="icon-button" id="playYoutubeButton" type="button" title="YouTube 재생" aria-label="YouTube 재생"><i data-lucide="play"></i></button>
+                      <button class="icon-button" id="saveYoutubeButton" type="button" title="링크를 사운드보드에 추가" aria-label="링크를 사운드보드에 추가"><i data-lucide="plus"></i></button>
+                    </div>
+                    <button class="icon-button" id="stopSoundsButton" type="button" title="사운드 정지" aria-label="사운드 정지"><i data-lucide="square"></i></button>
+                    <button class="secondary-button" id="importSoundsButton" type="button" title="사운드 파일 추가"><i data-lucide="file-plus-2"></i><span>파일 추가</span></button>
+                  </div>
+                  <div class="sound-list" id="soundGrid"></div>
+                  <p class="empty-state" id="emptySounds"><i data-lucide="music-2"></i><span>저장된 사운드가 없습니다</span></p>
+                  <div class="pagination" id="soundPagination" aria-label="사운드 페이지">
+                    <button class="icon-button" id="previousSoundsButton" type="button" title="이전 페이지" aria-label="이전 페이지"><i data-lucide="chevron-left"></i></button>
+                    <span id="soundPageLabel" aria-live="polite">1 / 1</span>
+                    <button class="icon-button" id="nextSoundsButton" type="button" title="다음 페이지" aria-label="다음 페이지"><i data-lucide="chevron-right"></i></button>
+                  </div>
+                </section>
+
+                <section id="settings-panel" class="drawer-panel settings-panel" aria-label="음성 및 출력 설정" hidden>
+                  <fieldset class="settings-group">
+                    <legend>음성</legend>
+                    <div class="settings-fields">
+                      <div class="field"><span id="engineLabel">엔진</span><div class="select-row"><select id="engineSelect" aria-labelledby="engineLabel"><option value="azure">Azure Speech</option><option value="edge">Edge Online (기존)</option><option value="windows">Windows Local</option></select><button id="azureSettingsButton" class="icon-button" type="button" title="Azure 키 및 지역" aria-label="Azure 키 및 지역" hidden><i data-lucide="key-round"></i></button></div></div>
+                      <label class="field"><span>목소리</span><select id="voiceSelect"><option value="ko-KR-SunHiNeural">SunHi · 한국어</option><option value="ko-KR-JiMinNeural" data-azure-only hidden>JiMin · 한국어</option><option value="ko-KR-SeoHyeonNeural" data-azure-only hidden>SeoHyeon · 한국어</option><option value="ko-KR-SoonBokNeural" data-azure-only hidden>SoonBok · 한국어</option><option value="ko-KR-YuJinNeural" data-azure-only hidden>YuJin · 한국어</option><option value="en-US-JennyNeural">Jenny · 영어</option><option value="en-US-AriaNeural">Aria · 영어</option><option value="ja-JP-NanamiNeural">Nanami · 일본어</option><option value="zh-CN-XiaoxiaoNeural">Xiaoxiao · 중국어</option></select></label>
+                      <label class="field"><span>속도 <b id="rateValue">0%</b></span><input id="rateInput" type="range" min="-50" max="50" step="5" /></label>
+                      <label class="field"><span>피치 <b id="pitchValue">0Hz</b></span><input id="pitchInput" type="range" min="-80" max="80" step="5" /></label>
+                      <label class="field field-wide"><span>TTS 볼륨 <b id="ttsVolumeValue">0%</b></span><input id="ttsVolumeInput" type="range" min="-50" max="50" step="5" /></label>
+                    </div>
+                  </fieldset>
+                  <fieldset class="settings-group output-settings">
+                    <legend>출력</legend>
+                    <label class="field"><span>출력 장치</span><select id="outputDeviceSelect"></select></label>
+                    <div class="monitor-setting">
+                      <label class="monitor-toggle"><span>내 듣기 <b id="monitorVolumeValue">100%</b></span><input id="monitorEnabledInput" type="checkbox" role="switch" /></label>
+                      <input id="monitorVolumeInput" type="range" min="0" max="1" step="0.01" aria-label="내 듣기 볼륨" />
+                    </div>
+                    <label class="monitor-toggle background-toggle"><span>창을 닫아도 백그라운드 실행</span><input id="closeToTrayInput" type="checkbox" role="switch" /></label>
+                    <div class="settings-actions">
+                      <button class="icon-button" id="refreshDevicesButton" type="button" title="장치 새로고침" aria-label="장치 새로고침"><i data-lucide="refresh-cw"></i></button>
+                      <button class="icon-button" id="openDataButton" type="button" title="보관함 폴더 열기" aria-label="보관함 폴더 열기"><i data-lucide="folder-open"></i></button>
+                    </div>
+                  </fieldset>
+                </section>
+              </div>
             </div>
           </div>
-          <div class="youtube-row">
-            <input id="youtubeUrlInput" type="url" placeholder="YouTube 링크 붙여넣기" />
-            <button class="secondary-button" id="playYoutubeButton" type="button">
-              <i data-lucide="play"></i>
-              <span>YouTube 재생</span>
-            </button>
-            <button class="secondary-button" id="saveYoutubeButton" type="button">
-              <i data-lucide="plus"></i>
-              <span>보드에 추가</span>
-            </button>
-          </div>
-          <div class="item-grid" id="soundGrid"></div>
-          <p class="empty-state" id="emptySounds">저장된 사운드가 없습니다.</p>
         </section>
 
+        <footer class="statusbar" role="status" aria-live="polite"><span class="status-dot" id="statusDot"></span><span id="statusText">준비됨</span></footer>
       </main>
     </div>
 
     <div class="modal-backdrop" id="cableInstallModal" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="cableInstallTitle">
-        <div class="modal-icon">
-          <i data-lucide="cable"></i>
-        </div>
+        <div class="modal-icon"><i data-lucide="cable"></i></div>
         <div class="modal-copy">
-          <p class="eyebrow">Virtual audio cable required</p>
           <h3 id="cableInstallTitle">VB-CABLE 설치가 필요합니다</h3>
-          <p>
-            Discord로 TTS와 사운드보드를 보내려면 Windows에 가상 오디오 케이블이 설치되어 있어야 합니다.
-            설치 후 Windows를 재시작하거나 장치 새로고침을 눌러 주세요.
-          </p>
-          <ul class="modal-list">
-            <li>Voiceboard 출력 장치: <b>CABLE Input</b></li>
-            <li>Discord 기본 입력 장치: <b>CABLE Output</b></li>
-          </ul>
+          <p>Discord로 TTS와 사운드보드를 보내려면 가상 오디오 케이블이 필요합니다. 설치 후 Windows를 재시작하거나 장치를 다시 확인해 주세요.</p>
+          <ul class="modal-list"><li>Voiceboard 출력: <b>CABLE Input</b></li><li>Discord 기본 입력: <b>CABLE Output</b></li></ul>
           <div class="modal-actions">
-            <button class="primary-button" id="downloadCableButton" type="button">
-              <i data-lucide="external-link"></i>
-              <span>다운로드 페이지</span>
-            </button>
-            <button class="secondary-button" id="retryCableButton" type="button">
-              <i data-lucide="refresh-cw"></i>
-              <span>다시 확인</span>
-            </button>
-            <button class="ghost-button" id="dismissCableButton" type="button">
-              <span>나중에</span>
-            </button>
+            <button class="primary-button" id="downloadCableButton" type="button"><i data-lucide="external-link"></i><span>다운로드 페이지</span></button>
+            <button class="secondary-button" id="retryCableButton" type="button"><i data-lucide="refresh-cw"></i><span>다시 확인</span></button>
+            <button class="ghost-button" id="dismissCableButton" type="button">나중에</button>
           </div>
         </div>
       </section>
     </div>
-
     <div class="modal-backdrop" id="soundEditModal" hidden>
-      <section class="modal edit-modal" role="dialog" aria-modal="true" aria-labelledby="soundEditTitle">
-        <div class="modal-icon">
-          <i data-lucide="scissors"></i>
-        </div>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="soundEditTitle">
+        <div class="modal-icon"><i data-lucide="scissors"></i></div>
         <div class="modal-copy">
-          <p class="eyebrow">Sound edit</p>
           <h3 id="soundEditTitle">사운드 편집</h3>
           <div class="edit-form">
-            <label class="field">
-              <span>시작 위치(초)</span>
-              <input id="soundEditStartInput" type="number" min="0" step="0.1" value="0" />
-            </label>
-            <label class="field">
-              <span>길이(초)</span>
-              <input id="soundEditDurationInput" type="number" min="0.1" step="0.1" value="5" />
-            </label>
+            <label class="field"><span>시작 위치(초)</span><input id="soundEditStartInput" type="number" min="0" step="0.1" value="0" /></label>
+            <label class="field"><span>길이(초)</span><input id="soundEditDurationInput" type="number" min="0.1" step="0.1" value="5" /></label>
           </div>
           <div class="modal-actions">
-            <button class="primary-button" id="saveSoundEditButton" type="button">
-              <i data-lucide="save"></i>
-              <span>저장</span>
-            </button>
-            <button class="secondary-button" id="cancelSoundEditButton" type="button">
-              <span>취소</span>
-            </button>
+            <button class="primary-button" id="saveSoundEditButton" type="button"><i data-lucide="save"></i><span>저장</span></button>
+            <button class="secondary-button" id="cancelSoundEditButton" type="button">취소</button>
           </div>
         </div>
       </section>
     </div>
-
+    <div class="modal-backdrop" id="azureSettingsModal" hidden>
+      <section class="modal azure-modal" role="dialog" aria-modal="true" aria-labelledby="azureSettingsTitle">
+        <div class="modal-icon"><i data-lucide="key-round"></i></div>
+        <div class="modal-copy">
+          <div class="azure-heading"><h3 id="azureSettingsTitle">Azure Speech</h3><div class="azure-heading-actions"><button class="icon-button" id="openAzurePortalButton" type="button" title="Azure 포털 열기" aria-label="Azure 포털 열기"><i data-lucide="external-link"></i></button><button class="icon-button" id="closeAzureSettingsButton" type="button" title="닫기" aria-label="Azure 설정 닫기"><i data-lucide="x"></i></button></div></div>
+          <label class="field"><span>지역 코드</span><input id="azureRegionInput" type="text" list="azureRegions" maxlength="40" placeholder="koreacentral" autocomplete="off" spellcheck="false" /></label>
+          <datalist id="azureRegions"><option value="koreacentral">한국 중부</option><option value="japaneast">일본 동부</option><option value="eastus">미국 동부</option><option value="southeastasia">동남아시아</option><option value="westeurope">서유럽</option></datalist>
+          <label class="field"><span>API 키</span><input id="azureKeyInput" type="password" maxlength="512" placeholder="Azure Speech 키" autocomplete="off" spellcheck="false" /></label>
+          <p id="azureSettingsStatus" role="status" aria-live="polite">키 미등록</p>
+          <div class="modal-actions">
+            <button class="primary-button" id="saveAzureSettingsButton" type="button"><i data-lucide="save"></i><span>저장</span></button>
+            <button class="secondary-button" id="testAzureConnectionButton" type="button"><i data-lucide="plug"></i><span>연결 확인</span></button>
+            <button class="icon-button danger" id="deleteAzureSettingsButton" type="button" title="저장된 키 삭제" aria-label="저장된 Azure 키 삭제"><i data-lucide="trash-2"></i></button>
+          </div>
+        </div>
+      </section>
+    </div>
     <script src="../../node_modules/lucide/dist/umd/lucide.min.js"></script>
+    <script src="./panels.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

@@ -47,9 +47,10 @@ public static class DiscordWindow {
     SetCursorPos(fromX, y);
     mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
     try {
-      System.Threading.Thread.Sleep(80);
+      System.Threading.Thread.Sleep(200);
+      if (GetForegroundWindow() != hwnd) throw new InvalidOperationException("Discord 포커스가 변경되었습니다.");
       SetCursorPos(toX, y);
-      System.Threading.Thread.Sleep(150);
+      System.Threading.Thread.Sleep(350);
     } finally { mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero); }
   }
 }
@@ -60,7 +61,7 @@ $scope = [System.Windows.Automation.TreeScope]::Descendants
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $profile = $env:VOICEBOARD_DISCORD_PROFILE | ConvertFrom-Json
 $script:step = 'Discord 실행 상태'
-$deadline = [DateTime]::UtcNow.AddSeconds(35)
+$script:deadline = [DateTime]::UtcNow.AddSeconds(90)
 
 function Find-Control($names, $type = $null, $parent = $script:root) {
   foreach ($name in $names) {
@@ -72,19 +73,15 @@ function Find-Control($names, $type = $null, $parent = $script:root) {
           [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type))
     }
     $element = $parent.FindFirst($scope, $condition)
-    if ($element) { return $element }
+    if ($element -and $element.Current.IsEnabled) { return $element }
   }
   return $null
 }
 
-function Wait-Control($names, $type = $null, $seconds = 3) {
-  $until = [DateTime]::UtcNow.AddSeconds($seconds)
-  do {
-    if ([DateTime]::UtcNow -gt $deadline) { throw '설정 적용 시간 초과' }
-    $element = Find-Control $names $type
-    if ($element) { return $element }
-    Start-Sleep -Milliseconds 200
-  } while ([DateTime]::UtcNow -lt $until)
+function Wait-Control($names, $type = $null, $seconds = 6) {
+  if (Wait-DiscordCondition -Probe { $null -ne (Find-Control $names $type) } -TimeoutMs ($seconds * 1000)) {
+    return Find-Control $names $type
+  }
   return $null
 }
 
@@ -96,7 +93,7 @@ function Invoke-Control($element) {
   } elseif ($element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
     $pattern.Select()
   } else { throw '이 Discord 버전의 설정 항목을 조작할 수 없습니다' }
-  Start-Sleep -Milliseconds 200
+  Start-Sleep -Milliseconds 400
 }
 
 function Find-Toggle($names) {
@@ -111,17 +108,15 @@ function Find-Toggle($names) {
 }
 
 function Set-Toggle($names, $enabled) {
-  $element = Find-Toggle $names
-  if (!$element) { throw '스위치를 찾지 못했습니다' }
-  $pattern = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
   $expected = if ($enabled) { 'On' } else { 'Off' }
-  if ($pattern.Current.ToggleState.ToString() -ne $expected) {
-    $pattern.Toggle()
-    Start-Sleep -Milliseconds 250
-  }
-  $element = Find-Toggle $names
-  if (!$element -or $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString() -ne $expected) {
-    throw '스위치 적용 확인 실패'
+  Invoke-DiscordSetting -Label $names[0] -Test {
+    $element = Find-Toggle $names
+    $element -and $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString() -eq $expected
+  } -Apply {
+    $element = Find-Toggle $names
+    if (!$element) { throw '스위치를 찾지 못했습니다' }
+    $pattern = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+    if ($pattern.Current.ToggleState.ToString() -ne $expected) { $pattern.Toggle() }
   }
 }
 
@@ -151,6 +146,32 @@ function Read-Noise {
   return ''
 }
 
+function Read-Threshold {
+  $slider = Get-ThresholdSlider
+  if (!$slider) { return $null }
+  $range = $slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
+  if ($range.Minimum -eq 0 -and $range.Maximum -eq 100) { return $range.Value - 100 }
+  if ($range.Minimum -eq -100 -and $range.Maximum -eq 0) { return $range.Value }
+  throw '지원하지 않는 입력 감도 범위입니다'
+}
+
+function Test-Threshold {
+  $actual = Read-Threshold
+  return $null -ne $actual -and [Math]::Abs($actual - [double]$profile.thresholdDb) -le 0.25
+}
+
+function Test-VoiceControls {
+  return (Find-Control $noiseNames ([System.Windows.Automation.ControlType]::ComboBox)) -or
+    (Find-Control @('사용자 지정', 'Custom') ([System.Windows.Automation.ControlType]::RadioButton)) -or
+    (Find-Toggle $echoNames)
+}
+
+function Find-VoiceNavigation {
+  $voice = Find-Control @('음성 및 비디오', 'Voice & Video') ([System.Windows.Automation.ControlType]::Hyperlink)
+  if (!$voice) { $voice = Find-Control @('음성 및 비디오', 'Voice & Video') ([System.Windows.Automation.ControlType]::TabItem) }
+  return $voice
+}
+
 try {
   $processes = @(Get-Process -Name Discord,DiscordPTB,DiscordCanary -ErrorAction SilentlyContinue)
   $windows = @([DiscordWindow]::FindMainWindows([int[]]$processes.Id))
@@ -159,34 +180,40 @@ try {
   if ([DiscordWindow]::IsIconic($handle)) { [void][DiscordWindow]::ShowWindowAsync($handle, 9) }
   else { [void][DiscordWindow]::ShowWindowAsync($handle, 5) }
   [DiscordWindow]::Activate($handle)
-  Start-Sleep -Milliseconds 400
+  Start-Sleep -Milliseconds 800
   $script:root = [System.Windows.Automation.AutomationElement]::FromHandle($handle)
   $noiseNames = @('잡음 제거', 'Noise Suppression')
   $echoNames = @('에코 억제', '에코 제거', 'Echo Cancellation')
   $autoNames = @('입력 감도 자동 조정하기', '자동으로 입력 감도 조정', 'Automatically determine input sensitivity', 'Automatically Determine Input Sensitivity')
 
   $script:step = '음성 설정 화면 열기'
-  if (!(Wait-Control $noiseNames ([System.Windows.Automation.ControlType]::ComboBox) 1)) {
-    $settings = Wait-Control @('사용자 설정', 'User Settings') ([System.Windows.Automation.ControlType]::Button)
-    if ($settings) { Invoke-Control $settings }
-    $voice = Wait-Control @('음성 및 비디오', 'Voice & Video') ([System.Windows.Automation.ControlType]::Hyperlink) 2
-    if (!$voice) { $voice = Wait-Control @('음성 및 비디오', 'Voice & Video') ([System.Windows.Automation.ControlType]::TabItem) 1 }
-    if ($voice) { Invoke-Control $voice }
+  if (!(Wait-DiscordCondition -Probe { Test-VoiceControls } -TimeoutMs 2000)) {
+    if (!(Find-VoiceNavigation)) {
+      Invoke-Control (Wait-Control @('사용자 설정', 'User Settings') ([System.Windows.Automation.ControlType]::Button))
+    }
+    if (!(Wait-DiscordCondition -Probe { $null -ne (Find-VoiceNavigation) } -TimeoutMs 8000)) { throw '음성 설정 메뉴를 찾지 못했습니다' }
+    Invoke-Control (Find-VoiceNavigation)
   }
-  $null = Wait-Control $noiseNames ([System.Windows.Automation.ControlType]::ComboBox) 4
+  if (!(Wait-DiscordCondition -Probe { Test-VoiceControls } -TimeoutMs 10000)) { throw '음성 설정 화면이 준비되지 않았습니다' }
 
   $script:step = '사용자 지정 음성 프로필'
   $custom = Find-Control @('사용자 지정', 'Custom') ([System.Windows.Automation.ControlType]::RadioButton)
   if ($custom -and !$custom.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected) {
-    Invoke-Control $custom
+    Invoke-DiscordSetting -Label '사용자 지정 프로필' -Test {
+      $item = Find-Control @('사용자 지정', 'Custom') ([System.Windows.Automation.ControlType]::RadioButton)
+      $item -and $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+    } -Apply {
+      Invoke-Control (Find-Control @('사용자 지정', 'Custom') ([System.Windows.Automation.ControlType]::RadioButton))
+    }
   }
 
   $script:step = '잡음 제거'
   $labels = if ($profile.noise -eq 'krisp') { @('Krisp') } else { @('없음', 'None') }
-  if ((Read-Noise) -notin $labels) {
+  Invoke-DiscordSetting -Label '잡음 제거' -Test { (Read-Noise) -in $labels } -Apply {
     $combo = Find-Control $noiseNames ([System.Windows.Automation.ControlType]::ComboBox)
     if ($combo) {
-      $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+      $expand = $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+      if ($expand.Current.ExpandCollapseState.ToString() -ne 'Expanded') { $expand.Expand() }
       $option = Wait-Control $labels ([System.Windows.Automation.ControlType]::ListItem)
       if (!$option) { $option = Wait-Control $labels ([System.Windows.Automation.ControlType]::RadioButton) 1 }
       Invoke-Control $option
@@ -194,7 +221,6 @@ try {
       Invoke-Control (Find-Control $labels ([System.Windows.Automation.ControlType]::RadioButton))
     }
   }
-  if ((Read-Noise) -notin $labels) { throw '잡음 제거 적용 확인 실패' }
 
   $script:step = '에코 억제'
   if (!(Find-Toggle $echoNames)) {
@@ -206,6 +232,8 @@ try {
   $script:step = '자동 입력 감도 끄기'
   Set-Toggle $autoNames $false
   $script:step = '입력 감도'
+  Invoke-DiscordSetting -Label '입력 감도' -Test { Test-Threshold } -Apply {
+  if (!(Wait-DiscordCondition -Probe { $null -ne (Get-ThresholdSlider) })) { throw '입력 감도가 준비되지 않았습니다' }
   $slider = Get-ThresholdSlider
   if (!$slider) { throw '입력 감도 슬라이더를 찾지 못했습니다' }
   $range = $slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
@@ -215,15 +243,18 @@ try {
   } elseif ($range.Current.Minimum -eq -100 -and $range.Current.Maximum -eq 0) {
     $value = [double]$profile.thresholdDb
   } else { throw '지원하지 않는 입력 감도 범위입니다' }
-  $range.SetValue($value)
-  Start-Sleep -Milliseconds 350
-  $slider = Get-ThresholdSlider
-  if (!$slider -or [Math]::Abs($slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value - $value) -gt 0.1) {
+  try { $range.SetValue($value) } catch { }
+  if (!(Wait-DiscordCondition -Probe { Test-Threshold } -TimeoutMs 1500)) {
     # Discord's custom slider can ignore accessibility writes; use its observed track bounds.
+    $slider = Get-ThresholdSlider
     if (!$slider) { throw '입력 감도 슬라이더를 찾지 못했습니다' }
     [DiscordWindow]::Activate($handle)
     $slider.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView()
-    Start-Sleep -Milliseconds 150
+    if (!(Wait-DiscordCondition -Probe {
+      $visible = Get-ThresholdSlider
+      $visible -and !$visible.Current.IsOffscreen -and $visible.Current.BoundingRectangle.Width -ge 100
+    } -TimeoutMs 4000)) { throw '입력 감도가 화면에 보이지 않습니다' }
+    Start-Sleep -Milliseconds 450
     $slider = Get-ThresholdSlider
     $rect = $slider.Current.BoundingRectangle
     if ($slider.Current.IsOffscreen -or $rect.Width -lt 100 -or $rect.Height -le 0) { throw '입력 감도가 화면에 보이지 않습니다' }
@@ -231,18 +262,15 @@ try {
     $currentRange = $slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current
     $currentFraction = ($currentRange.Value - $currentRange.Minimum) / ($currentRange.Maximum - $currentRange.Minimum)
     [DiscordWindow]::DragSlider($handle, [int]($rect.Left + $rect.Width * $currentFraction), [int]($rect.Left + $rect.Width * $fraction), [int]($rect.Top + $rect.Height / 2))
-    Start-Sleep -Milliseconds 250
-    $slider = Get-ThresholdSlider
-    if (!$slider -or [Math]::Abs($slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value - $value) -gt 0.25) {
-      $actual = if ($slider) { $slider.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value } else { 'unknown' }
-      throw "입력 감도 적용 확인 실패 (목표 $value, 실제 $actual)"
-    }
+  }
   }
   # Verify all controls together after Discord has processed the changes.
-  if ((Read-Noise) -notin $labels) { throw '잡음 제거 최종 확인 실패' }
-  $echo = (Find-Toggle $echoNames).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
-  $auto = (Find-Toggle $autoNames).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
-  if (($echo -eq 'On') -ne [bool]$profile.echo -or $auto -ne 'Off') { throw '음성 설정 최종 확인 실패' }
+  $script:step = '최종 확인'
+  if (!(Wait-DiscordCondition -StableReads 3 -Probe {
+    $echo = (Find-Toggle $echoNames).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
+    $auto = (Find-Toggle $autoNames).GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
+    (Read-Noise) -in $labels -and (($echo -eq 'On') -eq [bool]$profile.echo) -and $auto -eq 'Off' -and (Test-Threshold)
+  })) { throw '음성 설정 최종 확인 실패' }
   @{ applied = $true; noise = $profile.noise; echo = $profile.echo; thresholdDb = $profile.thresholdDb } | ConvertTo-Json -Compress
 } catch {
   @{ applied = $false; message = "Discord 설정 확인 필요 ($script:step): $($_.Exception.Message)" } | ConvertTo-Json -Compress

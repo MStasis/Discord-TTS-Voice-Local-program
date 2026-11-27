@@ -4,3 +4,10 @@ out/
 .voiceboard-test/
 npm-debug.log*
 *.tmp
+.env
+.env.*
+!.env.example
+azure-credentials.json
+library.json
+tts-cache/
+youtube-cache/
